@@ -9,6 +9,7 @@ __pycache__/
 *$py.class
 *.so
 .pytest_cache/
+.python-version
 
 # DANE I LOGI (Kluczowe dla prywatności!)
 # Ignorujemy bazę danych i pliki od brokera w tych folderach
