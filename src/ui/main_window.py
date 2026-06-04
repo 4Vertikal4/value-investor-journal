@@ -128,7 +128,9 @@ class MainWindow(QMainWindow):
         Otwiera dialog dodawania pozycji.
         """
 
-        dialog = PositionDialog(self)
+        dialog = PositionDialog(
+            parent=self,
+        )
 
         if dialog.exec():
             try:
