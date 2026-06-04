@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
 
 from src.config import CATEGORY_COLORS
 from src.models import Position
+from src.ui.position_details_dialog import (
+    PositionDetailsDialog,
+)
 
 
 class DashboardTableModel(QAbstractTableModel):
@@ -226,3 +229,31 @@ class DashboardTableView(QTableView):
         header.setStretchLastSection(True)
 
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
+
+        self.doubleClicked.connect(self._open_position_details)
+
+    # ========================================================
+    # DETAILS DIALOG
+    # ========================================================
+
+    def _open_position_details(
+        self,
+        index: QModelIndex,
+    ) -> None:
+
+        model = self.model()
+
+        if model is None:
+            return
+
+        position = model.get_position(index.row())
+
+        if position is None:
+            return
+
+        dialog = PositionDetailsDialog(
+            position,
+            self,
+        )
+
+        dialog.exec()
