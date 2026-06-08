@@ -9,7 +9,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from src.database import update_position
 from src.models import Position
+from src.ui.position_dialog import PositionDialog
 
 
 class PositionDetailsDialog(QDialog):
@@ -22,9 +24,11 @@ class PositionDetailsDialog(QDialog):
 
         self.position = position
 
-        self.setWindowTitle(
-            f"{position.ticker} - Szczegóły pozycji"
-        )
+        # informacja dla tabeli,
+        # czy wykonano update
+        self.position_updated = False
+
+        self.setWindowTitle(f"{position.ticker} - Szczegóły pozycji")
 
         self.setMinimumWidth(700)
 
@@ -36,11 +40,25 @@ class PositionDetailsDialog(QDialog):
 
         form = QFormLayout()
 
-        form.addRow("Ticker", QLabel(self.position.ticker))
-        form.addRow("Nazwa", QLabel(self.position.name))
-        form.addRow("Sektor", QLabel(self.position.sector or "-"))
+        form.addRow(
+            "Ticker",
+            QLabel(self.position.ticker),
+        )
 
-        form.addRow("Ilość", QLabel(str(self.position.quantity)))
+        form.addRow(
+            "Nazwa",
+            QLabel(self.position.name),
+        )
+
+        form.addRow(
+            "Sektor",
+            QLabel(self.position.sector or "-"),
+        )
+
+        form.addRow(
+            "Ilość",
+            QLabel(str(self.position.quantity)),
+        )
 
         form.addRow(
             "Cena zakupu",
@@ -92,19 +110,43 @@ class PositionDetailsDialog(QDialog):
 
         thesis.setReadOnly(True)
 
-        thesis.setPlainText(
-            self.position.thesis or ""
-        )
+        thesis.setPlainText(self.position.thesis or "")
 
         thesis.setMinimumHeight(150)
 
         layout.addWidget(thesis)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Close
+        buttons = QDialogButtonBox()
+
+        self.edit_button = buttons.addButton(
+            "Edytuj",
+            QDialogButtonBox.ActionRole,
         )
+
+        buttons.addButton(
+            QDialogButtonBox.Close,
+        )
+
+        self.edit_button.clicked.connect(self._edit_position)
 
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
 
         layout.addWidget(buttons)
+
+    def _edit_position(self) -> None:
+
+        dialog = PositionDialog(
+            position=self.position,
+            parent=self,
+        )
+
+        if dialog.exec():
+
+            updated_position = dialog.get_position()
+
+            update_position(updated_position)
+
+            self.position_updated = True
+
+            self.accept()

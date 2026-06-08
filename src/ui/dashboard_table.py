@@ -257,3 +257,13 @@ class DashboardTableView(QTableView):
         )
 
         dialog.exec()
+
+        if dialog.position_updated:
+
+            window = self.window()
+
+            if hasattr(
+                window,
+                "refresh_positions",
+            ):
+                window.refresh_positions()
