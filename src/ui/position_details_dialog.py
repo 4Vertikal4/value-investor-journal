@@ -13,7 +13,10 @@ from PySide6.QtWidgets import (
 from src.database import (
     delete_position,
     update_position,
+    insert_review,
 )
+
+from src.ui.review_dialog import ReviewDialog
 from src.models import Position
 from src.ui.position_dialog import PositionDialog
 
@@ -127,6 +130,11 @@ class PositionDetailsDialog(QDialog):
             QDialogButtonBox.ActionRole,
         )
 
+        self.review_button = buttons.addButton(
+            "Dodaj rewizję",
+            QDialogButtonBox.ActionRole,
+        )
+
         self.delete_button = buttons.addButton(
             "Usuń",
             QDialogButtonBox.ActionRole,
@@ -139,6 +147,8 @@ class PositionDetailsDialog(QDialog):
         self.edit_button.clicked.connect(self._edit_position)
 
         self.delete_button.clicked.connect(self._delete_position)
+
+        self.review_button.clicked.connect(self._add_review)
 
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
@@ -179,3 +189,23 @@ class PositionDetailsDialog(QDialog):
         self.position_deleted = True
 
         self.accept()
+
+    def _add_review(self) -> None:
+
+        dialog = ReviewDialog(
+            position=self.position,
+            parent=self,
+        )
+
+        if not dialog.exec():
+            return
+
+        review = dialog.get_review()
+
+        insert_review(review)
+
+        QMessageBox.information(
+            self,
+            "Rewizja",
+            "Rewizja została zapisana.",
+        )
