@@ -5,11 +5,15 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QVBoxLayout,
 )
 
-from src.database import update_position
+from src.database import (
+    delete_position,
+    update_position,
+)
 from src.models import Position
 from src.ui.position_dialog import PositionDialog
 
@@ -24,9 +28,9 @@ class PositionDetailsDialog(QDialog):
 
         self.position = position
 
-        # informacja dla tabeli,
-        # czy wykonano update
         self.position_updated = False
+
+        self.position_deleted = False
 
         self.setWindowTitle(f"{position.ticker} - Szczegóły pozycji")
 
@@ -123,11 +127,18 @@ class PositionDetailsDialog(QDialog):
             QDialogButtonBox.ActionRole,
         )
 
+        self.delete_button = buttons.addButton(
+            "Usuń",
+            QDialogButtonBox.ActionRole,
+        )
+
         buttons.addButton(
             QDialogButtonBox.Close,
         )
 
         self.edit_button.clicked.connect(self._edit_position)
+
+        self.delete_button.clicked.connect(self._delete_position)
 
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
@@ -150,3 +161,21 @@ class PositionDetailsDialog(QDialog):
             self.position_updated = True
 
             self.accept()
+
+    def _delete_position(self) -> None:
+
+        answer = QMessageBox.question(
+            self,
+            "Usuń pozycję",
+            (f"Czy na pewno usunąć " f"pozycję {self.position.ticker}?"),
+            QMessageBox.Yes | QMessageBox.No,
+        )
+
+        if answer != QMessageBox.Yes:
+            return
+
+        delete_position(self.position.id)
+
+        self.position_deleted = True
+
+        self.accept()

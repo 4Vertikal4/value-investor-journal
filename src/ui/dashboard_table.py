@@ -258,7 +258,7 @@ class DashboardTableView(QTableView):
 
         dialog.exec()
 
-        if dialog.position_updated:
+        if dialog.position_updated or dialog.position_deleted:
 
             window = self.window()
 
