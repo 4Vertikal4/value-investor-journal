@@ -14,6 +14,7 @@ from src.database import (
     delete_position,
     update_position,
     insert_review,
+    get_reviews_for_position,
 )
 
 from src.ui.review_dialog import ReviewDialog
@@ -122,6 +123,39 @@ class PositionDetailsDialog(QDialog):
         thesis.setMinimumHeight(150)
 
         layout.addWidget(thesis)
+
+        reviews = get_reviews_for_position(self.position.id)
+
+        reviews_box = QPlainTextEdit()
+
+        reviews_box.setReadOnly(True)
+
+        reviews_box.setMinimumHeight(200)
+
+        if not reviews:
+            reviews_box.setPlainText("Brak rewizji.")
+        else:
+
+            lines = []
+
+            for review in reviews:
+
+                lines.append(f"{review.review_date}")
+
+                lines.append(f"{review.category.value}")
+
+                lines.append(f"{review.instruction.value}")
+
+                if review.notes:
+                    lines.append(review.notes)
+
+                lines.append("-" * 40)
+
+            reviews_box.setPlainText("\n".join(lines))
+
+        layout.addWidget(QLabel("Historia rewizji"))
+
+        layout.addWidget(reviews_box)
 
         buttons = QDialogButtonBox()
 
