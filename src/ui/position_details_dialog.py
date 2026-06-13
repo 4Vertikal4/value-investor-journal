@@ -130,9 +130,11 @@ class PositionDetailsDialog(QDialog):
 
         self.reviews_box.setMinimumHeight(200)
 
+        self.review_label = QLabel("Historia rewizji")
+
         self._refresh_reviews()
 
-        layout.addWidget(QLabel("Historia rewizji"))
+        layout.addWidget(self.review_label)
 
         layout.addWidget(self.reviews_box)
 
@@ -171,6 +173,10 @@ class PositionDetailsDialog(QDialog):
     def _refresh_reviews(self) -> None:
 
         reviews = get_reviews_for_position(self.position.id)
+
+        review_count = len(reviews)
+
+        self.review_label.setText(f"Historia rewizji ({review_count})")
 
         if not reviews:
             self.reviews_box.setPlainText("Brak rewizji.")
@@ -241,6 +247,8 @@ class PositionDetailsDialog(QDialog):
         review = dialog.get_review()
 
         insert_review(review)
+
+        self._refresh_reviews()
 
         self._refresh_reviews()
 
