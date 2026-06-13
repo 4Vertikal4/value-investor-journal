@@ -124,38 +124,17 @@ class PositionDetailsDialog(QDialog):
 
         layout.addWidget(thesis)
 
-        reviews = get_reviews_for_position(self.position.id)
+        self.reviews_box = QPlainTextEdit()
 
-        reviews_box = QPlainTextEdit()
+        self.reviews_box.setReadOnly(True)
 
-        reviews_box.setReadOnly(True)
+        self.reviews_box.setMinimumHeight(200)
 
-        reviews_box.setMinimumHeight(200)
-
-        if not reviews:
-            reviews_box.setPlainText("Brak rewizji.")
-        else:
-
-            lines = []
-
-            for review in reviews:
-
-                lines.append(f"{review.review_date}")
-
-                lines.append(f"{review.category.value}")
-
-                lines.append(f"{review.instruction.value}")
-
-                if review.notes:
-                    lines.append(review.notes)
-
-                lines.append("-" * 40)
-
-            reviews_box.setPlainText("\n".join(lines))
+        self._refresh_reviews()
 
         layout.addWidget(QLabel("Historia rewizji"))
 
-        layout.addWidget(reviews_box)
+        layout.addWidget(self.reviews_box)
 
         buttons = QDialogButtonBox()
 
@@ -188,6 +167,31 @@ class PositionDetailsDialog(QDialog):
         buttons.accepted.connect(self.accept)
 
         layout.addWidget(buttons)
+
+    def _refresh_reviews(self) -> None:
+
+        reviews = get_reviews_for_position(self.position.id)
+
+        if not reviews:
+            self.reviews_box.setPlainText("Brak rewizji.")
+            return
+
+        lines = []
+
+        for review in reviews:
+
+            lines.append(review.review_date)
+
+            lines.append(review.category.value)
+
+            lines.append(review.instruction.value)
+
+            if review.notes:
+                lines.append(review.notes)
+
+            lines.append("-" * 40)
+
+        self.reviews_box.setPlainText("\n".join(lines))
 
     def _edit_position(self) -> None:
 
@@ -237,6 +241,8 @@ class PositionDetailsDialog(QDialog):
         review = dialog.get_review()
 
         insert_review(review)
+
+        self._refresh_reviews()
 
         QMessageBox.information(
             self,
