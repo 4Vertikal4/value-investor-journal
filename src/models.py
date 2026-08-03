@@ -48,9 +48,15 @@ class Position:
             buy_date=str(_row_get(row, "buy_date", "")),
             review_date=str(_row_get(row, "review_date", "")),
             currency=str(_row_get(row, "currency", DEFAULT_CURRENCY)),
-            sell_threshold_gain=float(_row_get(row, "sell_threshold_gain", DEFAULT_SELL_THRESHOLD_GAIN)),
-            sell_threshold_profit=float(_row_get(row, "sell_threshold_profit", DEFAULT_SELL_THRESHOLD_PROFIT)),
-            sell_threshold_loss=float(_row_get(row, "sell_threshold_loss", DEFAULT_SELL_THRESHOLD_LOSS)),
+            sell_threshold_gain=float(
+                _row_get(row, "sell_threshold_gain", DEFAULT_SELL_THRESHOLD_GAIN)
+            ),
+            sell_threshold_profit=float(
+                _row_get(row, "sell_threshold_profit", DEFAULT_SELL_THRESHOLD_PROFIT)
+            ),
+            sell_threshold_loss=float(
+                _row_get(row, "sell_threshold_loss", DEFAULT_SELL_THRESHOLD_LOSS)
+            ),
             status=str(_row_get(row, "status", STATUS_OPEN)),
             current_price=(
                 None
@@ -109,14 +115,6 @@ class Review:
     return_pct: float
     category: str
     instruction: str
-    @dataclass(slots=True)
-class Review:
-    position_id: int
-    review_date: str
-    price_then: float
-    return_pct: float
-    category: str
-    instruction: str
     pe_ratio: float | None = None
     dividend_yield: float | None = None
     debt_to_equity: float | None = None
@@ -166,23 +164,23 @@ class Review:
             self.notes,
         )
 
-        def to_dict(self) -> dict[str, Any]:
-            return {
-                "id": self.id,
-                "position_id": self.position_id,
-                "review_date": self.review_date,
-                "price_then": self.price_then,
-                "return_pct": self.return_pct,
-                "category": self.category,
-                "instruction": self.instruction,
-                "pe_ratio": self.pe_ratio,
-                "dividend_yield": self.dividend_yield,
-                "debt_to_equity": self.debt_to_equity,
-                "roe": self.roe,
-                "payout_ratio": self.payout_ratio,
-                "revenue_growth_3y": self.revenue_growth_3y,
-                "notes": self.notes,
-            }
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "position_id": self.position_id,
+            "review_date": self.review_date,
+            "price_then": self.price_then,
+            "return_pct": self.return_pct,
+            "category": self.category,
+            "instruction": self.instruction,
+            "pe_ratio": self.pe_ratio,
+            "dividend_yield": self.dividend_yield,
+            "debt_to_equity": self.debt_to_equity,
+            "roe": self.roe,
+            "payout_ratio": self.payout_ratio,
+            "revenue_growth_3y": self.revenue_growth_3y,
+            "notes": self.notes,
+        }
 
 
 @dataclass(slots=True)
@@ -206,7 +204,13 @@ class AssetCategory:
         )
 
     def to_db_tuple(self) -> tuple[Any, ...]:
-        return (self.name, self.target_pct, self.actual_pct, self.color, self.sort_order)
+        return (
+            self.name,
+            self.target_pct,
+            self.actual_pct,
+            self.color,
+            self.sort_order,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
