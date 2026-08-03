@@ -55,9 +55,6 @@ class Position:
             current_price=(
                 None
                 if _row_get(row, "current_price") is None
-                            current_price=(
-                None
-                if _row_get(row, "current_price") is None
                 else float(_row_get(row, "current_price"))
             ),
         )
