@@ -1,64 +1,48 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import (
-    APP_NAME,
-    APP_VERSION,
-    ORG_NAME,
-    ensure_directories,
-)
-from src.database import init_db
+from PySide6.QtWidgets import QApplication, QMessageBox
+
+from src.config import APP_NAME, DATA_DIR, IMPORTS_DIR
+from src.database import Database, seed_demo_data
+from src.notification_service import NotificationService
 from src.ui.main_window import MainWindow
-from src.ui.styles import apply_theme
+from src.ui.styles import apply_breeze_dark
+
+
+def ensure_directories() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    IMPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def main() -> int:
-    """
-    Główny entrypoint aplikacji.
-    """
-
-    # ========================================================
-    # INIT
-    # ========================================================
-
     ensure_directories()
-
-    init_db()
-
-    # ========================================================
-    # QT APPLICATION
-    # ========================================================
-
     app = QApplication(sys.argv)
-
     app.setApplicationName(APP_NAME)
-    app.setApplicationVersion(APP_VERSION)
-    app.setOrganizationName(ORG_NAME)
+    apply_breeze_dark(app)
 
-    # KDE / Plasma integration
-    app.setDesktopFileName("value-investor-journal")
+    database = Database()
+    try:
+        database.init()
+        seed_demo_data(database.db_path)
+    except Exception as exc:
+        QMessageBox.critical(
+            None, "Błąd startu", f"Nie udało się przygotować bazy danych:\n{exc}"
+        )
+        return 1
 
-    # ========================================================
-    # THEME
-    # ========================================================
-
-    apply_theme(app)
-
-    # ========================================================
-    # MAIN WINDOW
-    # ========================================================
-
-    window = MainWindow()
-
+    window = MainWindow(database)
     window.show()
-
-    # ========================================================
-    # EVENT LOOP
-    # ========================================================
-
+    notification_service = NotificationService(database, window, app)
+    notification_service.check_due_reviews()
+    app.setProperty("notification_service", notification_service)
     return app.exec()
 
 

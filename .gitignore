@@ -1,27 +1,18 @@
-# Środowisko wirtualne (stworzone przez Makefile)
 .venv/
-venv/
-ENV/
-
-# Pythonowe pliki tymczasowe
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+
 .pytest_cache/
-.python-version
+.mypy_cache/
+.ruff_cache/
 
-# DANE I LOGI (Kluczowe dla prywatności!)
-# Ignorujemy bazę danych i pliki od brokera w tych folderach
 data/*.db
-data/*.sqlite
-imports/*.csv
-imports/*.pdf
-imports/*.xlsx
+data/*.db-*
 
-# Systemowe i IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-.DS_Store
+imports/*
+!imports/.gitkeep
+
+!data/.gitkeep
+
+*.xlsx
+*.csv
