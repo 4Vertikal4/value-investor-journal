@@ -4,7 +4,7 @@ Copyright © 2026 Tomasz Kopek
 
 This project is licensed under the PolyForm Noncommercial License 1.0.0.
 
-Commercial use of this software is prohibited without the explicit written permission of the author.
+See the LICENSE file for details.
 
 # Dziennik Inwestora Value
 
@@ -78,10 +78,3 @@ wykres kołowy + tabela target/actual/delta.
 Tray icon z przypomnieniami o terminach rewizji.
 
 Eksport XLSX/CSV z backup bazy SQLite.
-
-
-Value Investor Journal
-
-Copyright © 2026 Tomasz Kopek
-
-All rights reserved.
