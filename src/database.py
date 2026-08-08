@@ -7,7 +7,13 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterator, Sequence
 
-from src.config import ASSET_DEFAULTS, DB_PATH, REVIEW_INTERVAL_DAYS, STATUS_CLOSED, STATUS_OPEN
+from src.config import (
+    ASSET_DEFAULTS,
+    DB_PATH,
+    REVIEW_INTERVAL_DAYS,
+    STATUS_CLOSED,
+    STATUS_OPEN,
+)
 from src.models import AssetCategory, MarketData, Position, Review
 
 POSITIONS_SQL = """
@@ -84,8 +90,12 @@ def init_db(db_path: Path = DB_PATH) -> None:
         conn.executescript(REVIEWS_SQL)
         conn.executescript(ASSET_CATEGORIES_SQL)
         conn.executescript(MARKET_DATA_SQL)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_reviews_position_date ON reviews(position_id, review_date DESC, id DESC)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_status_review ON positions(status, review_date)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reviews_position_date ON reviews(position_id, review_date DESC, id DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_positions_status_review ON positions(status, review_date)"
+        )
 
 
 class Database:
@@ -119,16 +129,22 @@ class Database:
                 cursor = conn.execute(sql, position.to_db_tuple())
                 return int(cursor.lastrowid)
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się dodać pozycji {position.ticker}: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się dodać pozycji {position.ticker}: {exc}"
+            ) from exc
 
     def get_position_by_id(self, position_id: int) -> Position | None:
         with self.connection() as conn:
-            row = conn.execute("SELECT * FROM positions WHERE id = ?", (position_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM positions WHERE id = ?", (position_id,)
+            ).fetchone()
         return Position.from_row(row) if row else None
 
     def get_position_by_ticker(self, ticker: str) -> Position | None:
         with self.connection() as conn:
-            row = conn.execute("SELECT * FROM positions WHERE ticker = ?", (ticker.upper().strip(),)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM positions WHERE ticker = ?", (ticker.upper().strip(),)
+            ).fetchone()
         return Position.from_row(row) if row else None
 
     def get_all_positions(self, include_closed: bool = False) -> list[Position]:
@@ -172,16 +188,27 @@ class Database:
             with self.connection() as conn:
                 conn.execute(sql, values)
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się zaktualizować pozycji {position.ticker}: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się zaktualizować pozycji {position.ticker}: {exc}"
+            ) from exc
 
-    def update_position_current_price(self, position_id: int, current_price: float) -> None:
+    def update_position_current_price(
+        self, position_id: int, current_price: float
+    ) -> None:
         try:
             with self.connection() as conn:
-                conn.execute("UPDATE positions SET current_price = ? WHERE id = ?", (current_price, position_id))
+                conn.execute(
+                    "UPDATE positions SET current_price = ? WHERE id = ?",
+                    (current_price, position_id),
+                )
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się zaktualizować aktualnej ceny: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się zaktualizować aktualnej ceny: {exc}"
+            ) from exc
 
-    def update_position_after_review(self, position_id: int, current_price: float, next_review_date: str) -> None:
+    def update_position_after_review(
+        self, position_id: int, current_price: float, next_review_date: str
+    ) -> None:
         try:
             with self.connection() as conn:
                 conn.execute(
@@ -189,14 +216,19 @@ class Database:
                     (current_price, next_review_date, position_id),
                 )
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się zaktualizować pozycji po rewizji: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się zaktualizować pozycji po rewizji: {exc}"
+            ) from exc
 
     def update_position_status(self, position_id: int, status: str) -> None:
         if status not in {STATUS_OPEN, STATUS_CLOSED}:
             raise ValueError("Status musi mieć wartość OPEN albo CLOSED.")
         try:
             with self.connection() as conn:
-                conn.execute("UPDATE positions SET status = ? WHERE id = ?", (status, position_id))
+                conn.execute(
+                    "UPDATE positions SET status = ? WHERE id = ?",
+                    (status, position_id),
+                )
         except sqlite3.Error as exc:
             raise RuntimeError(f"Nie udało się zmienić statusu pozycji: {exc}") from exc
 
@@ -239,7 +271,9 @@ class Database:
             row = conn.execute(sql, (position_id,)).fetchone()
         return Review.from_row(row) if row else None
 
-    def get_previous_review_for_position(self, position_id: int, before_review_id: int | None = None) -> Review | None:
+    def get_previous_review_for_position(
+        self, position_id: int, before_review_id: int | None = None
+    ) -> Review | None:
         if before_review_id is None:
             return self.get_last_review_for_position(position_id)
         sql = "SELECT * FROM reviews WHERE position_id = ? AND id < ? ORDER BY review_date DESC, id DESC LIMIT 1"
@@ -264,16 +298,22 @@ class Database:
                 cursor = conn.execute(sql, category.to_db_tuple())
                 return int(cursor.lastrowid)
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się dodać kategorii assetów {category.name}: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się dodać kategorii assetów {category.name}: {exc}"
+            ) from exc
 
     def get_all_asset_categories(self) -> list[AssetCategory]:
         with self.connection() as conn:
-            rows = conn.execute("SELECT * FROM asset_categories ORDER BY sort_order, name COLLATE NOCASE").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM asset_categories ORDER BY sort_order, name COLLATE NOCASE"
+            ).fetchall()
         return [AssetCategory.from_row(row) for row in rows]
 
     def get_asset_category_by_name(self, name: str) -> AssetCategory | None:
         with self.connection() as conn:
-            row = conn.execute("SELECT * FROM asset_categories WHERE name = ?", (name,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM asset_categories WHERE name = ?", (name,)
+            ).fetchone()
         return AssetCategory.from_row(row) if row else None
 
     def update_asset_category(self, category: AssetCategory) -> None:
@@ -288,23 +328,36 @@ class Database:
             with self.connection() as conn:
                 conn.execute(sql, (*category.to_db_tuple(), category.id))
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się zaktualizować kategorii assetów: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się zaktualizować kategorii assetów: {exc}"
+            ) from exc
 
     def update_asset_category_actual(self, name: str, actual_pct: float) -> None:
         try:
             with self.connection() as conn:
-                conn.execute("UPDATE asset_categories SET actual_pct = ? WHERE name = ?", (actual_pct, name))
+                conn.execute(
+                    "UPDATE asset_categories SET actual_pct = ? WHERE name = ?",
+                    (actual_pct, name),
+                )
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się zaktualizować aktualnej alokacji: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się zaktualizować aktualnej alokacji: {exc}"
+            ) from exc
 
     def delete_asset_category(self, category_id: int) -> None:
         try:
             with self.connection() as conn:
-                conn.execute("DELETE FROM asset_categories WHERE id = ?", (category_id,))
+                conn.execute(
+                    "DELETE FROM asset_categories WHERE id = ?", (category_id,)
+                )
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się usunąć kategorii assetów: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się usunąć kategorii assetów: {exc}"
+            ) from exc
 
-    def upsert_market_data(self, key: str, value: float, unit: str | None = None) -> None:
+    def upsert_market_data(
+        self, key: str, value: float, unit: str | None = None
+    ) -> None:
         updated_at = datetime.now().isoformat(timespec="seconds")
         sql = """
         INSERT INTO market_data (key, value, unit, updated_at)
@@ -318,16 +371,22 @@ class Database:
             with self.connection() as conn:
                 conn.execute(sql, (key, value, unit, updated_at))
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się zapisać danych rynkowych {key}: {exc}") from exc
+            raise RuntimeError(
+                f"Nie udało się zapisać danych rynkowych {key}: {exc}"
+            ) from exc
 
     def get_market_data(self, key: str) -> MarketData | None:
         with self.connection() as conn:
-            row = conn.execute("SELECT * FROM market_data WHERE key = ?", (key,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM market_data WHERE key = ?", (key,)
+            ).fetchone()
         return MarketData.from_row(row) if row else None
 
     def get_all_market_data(self) -> list[MarketData]:
         with self.connection() as conn:
-            rows = conn.execute("SELECT * FROM market_data ORDER BY key COLLATE NOCASE").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM market_data ORDER BY key COLLATE NOCASE"
+            ).fetchall()
         return [MarketData.from_row(row) for row in rows]
 
     def count_positions(self, include_closed: bool = True) -> int:
@@ -350,7 +409,14 @@ class Database:
 
     def sum_portfolio_value(self, include_closed: bool = False) -> float:
         positions = self.get_all_positions(include_closed=include_closed)
-        return round(sum(position.market_value() for position in positions if include_closed or position.status != STATUS_CLOSED), 2)
+        return round(
+            sum(
+                position.market_value()
+                for position in positions
+                if include_closed or position.status != STATUS_CLOSED
+            ),
+            2,
+        )
 
     def due_positions(self, on_date: date | None = None) -> list[Position]:
         on_date = on_date or date.today()
@@ -359,8 +425,8 @@ class Database:
             rows = conn.execute(
                 "SELECT * FROM positions WHERE status = ? AND review_date <= ? ORDER BY review_date, ticker COLLATE NOCASE",
                 (STATUS_OPEN, on_date.isoformat()),
-
-            return round(sum(position.market_value() for position in positions if include_closed or position.status != STATUS_CLOSED), 2)
+            ).fetchall()
+            return [Position.from_row(row) for row in rows]
 
     def export_database_backup(self, destination: Path) -> Path:
         destination = Path(destination)
@@ -375,7 +441,11 @@ class Database:
             return
 
         for name, target, color, order in ASSET_DEFAULTS:
-            db.insert_asset_category(AssetCategory(name=name, target_pct=target, color=color, sort_order=order))
+            db.insert_asset_category(
+                AssetCategory(
+                    name=name, target_pct=target, color=color, sort_order=order
+                )
+            )
 
         today = date.today()
         buy_date = today - timedelta(days=220)
@@ -453,7 +523,9 @@ class Database:
     def insert_position(position: Position, db_path: Path = DB_PATH) -> int:
         return Database(db_path).insert_position(position)
 
-    def get_all_positions(include_closed: bool = False, db_path: Path = DB_PATH) -> list[Position]:
+    def get_all_positions(
+        include_closed: bool = False, db_path: Path = DB_PATH
+    ) -> list[Position]:
         return Database(db_path).get_all_positions(include_closed=include_closed)
 
     def update_position(position: Position, db_path: Path = DB_PATH) -> None:
@@ -465,10 +537,14 @@ class Database:
     def insert_review(review: Review, db_path: Path = DB_PATH) -> int:
         return Database(db_path).insert_review(review)
 
-    def get_reviews_for_position(position_id: int, db_path: Path = DB_PATH) -> list[Review]:
+    def get_reviews_for_position(
+        position_id: int, db_path: Path = DB_PATH
+    ) -> list[Review]:
         return Database(db_path).get_reviews_for_position(position_id)
 
-    def get_last_review_for_position(position_id: int, db_path: Path = DB_PATH) -> Review | None:
+    def get_last_review_for_position(
+        position_id: int, db_path: Path = DB_PATH
+    ) -> Review | None:
         return Database(db_path).get_last_review_for_position(position_id)
 
     def insert_asset_category(category: AssetCategory, db_path: Path = DB_PATH) -> int:
@@ -480,7 +556,9 @@ class Database:
     def update_asset_category(category: AssetCategory, db_path: Path = DB_PATH) -> None:
         Database(db_path).update_asset_category(category)
 
-    def upsert_market_data(key: str, value: float, unit: str | None = None, db_path: Path = DB_PATH) -> None:
+    def upsert_market_data(
+        key: str, value: float, unit: str | None = None, db_path: Path = DB_PATH
+    ) -> None:
         Database(db_path).upsert_market_data(key, value, unit)
 
     def get_market_data(key: str, db_path: Path = DB_PATH) -> MarketData | None:
