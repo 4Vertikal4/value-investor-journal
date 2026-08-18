@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from src.config import APP_NAME, DATA_DIR, IMPORTS_DIR
-from src.database import Database, seed_demo_data
+from src.database import Database
 from src.notification_service import NotificationService
 from src.ui.main_window import MainWindow
 from src.ui.styles import apply_breeze_dark
@@ -31,7 +31,6 @@ def main() -> int:
     database = Database()
     try:
         database.init()
-        seed_demo_data(database.db_path)
     except Exception as exc:
         QMessageBox.critical(
             None, "Błąd startu", f"Nie udało się przygotować bazy danych:\n{exc}"
