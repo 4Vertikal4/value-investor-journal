@@ -29,8 +29,7 @@ except ImportError:
 
 from src.asset_engine import (
     format_pct,
-    get,
-    rebalance_delta,
+    get_rebalance_delta,
     recalculate_actual_allocation,
 )
 from src.database import Database
@@ -265,7 +264,7 @@ class AssetAllocationWidget(QWidget):
         positions = self.database.get_all_positions(include_closed=False)
         self.actual = recalculate_actual_allocation(positions)
         target = {category.name: category.target_pct for category in self.categories}
-        self.delta = rebalance_delta(target, self.actual)
+        self.delta = get_rebalance_delta(target, self.actual)
         self.refresh_chart()
         self.tiles.set_data(self.categories, self.actual, self.delta)
 
