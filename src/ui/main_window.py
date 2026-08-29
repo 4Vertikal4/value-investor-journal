@@ -631,6 +631,9 @@ class MainWindow(QMainWindow):
         self.show_closed = checked
         self.refresh_data()
 
+    def update_metrics(self) -> None:
+        self.offline_metrics_message()
+
     def offline_metrics_message(self) -> None:
         QMessageBox.information(
             self,
