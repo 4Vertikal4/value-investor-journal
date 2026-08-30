@@ -214,10 +214,10 @@ class MainWindow(QMainWindow):
         self.refresh_action.triggered.connect(self.refresh_data)
         self.show_closed_action.toggled.connect(self.toggle_closed)
         self.refresh_metrics_action.triggered.connect(self.update_metrics)
-        self.notifications_action.toggled.connect(self.show_notifications)
+        # self.notifications_action.toggled.connect(self.show_notifications)
         self.about_action.triggered.connect(self.show_about)
-        self.table.positionDoubleClicked.connect(self.select_position)
-        self.table.itemChanged.connect(self.update_details)
+        self.table.positionDoubleClicked.connect(self.update_details)
+        self.table.selectionChangedForPosition.connect(self.update_details)
         self.table.customContextMenuRequested.connect(self.open_context_menu)
 
     def refresh_data(self) -> None:
