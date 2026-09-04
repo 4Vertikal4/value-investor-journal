@@ -232,7 +232,7 @@ class MainWindow(QMainWindow):
         selected = self.table.selected_position
         if selected and selected in self.positions:
             self.update_details(selected)
-        total = self.database.get_portfolio_value(include_closed=self.show_closed)
+        total = self.database.sum_portfolio_value(include_closed=self.show_closed)
         self.statusBar().showMessage(
             f"Liczba pozycji: {len(self.positions)} | Suma portfela: {total:.2f} | Ostatnia aktualizacja: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )

@@ -434,132 +434,142 @@ class Database:
         shutil.copy2(self.db_path, destination)
         return destination
 
-    def seed_demo_data(db_path: Path = DB_PATH) -> None:
-        db = Database(db_path)
-        db.init()
-        if not db.is_database_empty():
-            return
 
-        for name, target, color, order in ASSET_DEFAULTS:
-            db.insert_asset_category(
-                AssetCategory(
-                    name=name, target_pct=target, color=color, sort_order=order
-                )
+def seed_demo_data(db_path: Path = DB_PATH) -> None:
+    db = Database(db_path)
+    db.init()
+
+    if not db.is_database_empty():
+        return
+
+    for name, target, color, order in ASSET_DEFAULTS:
+        db.insert_asset_category(
+            AssetCategory(name=name, target_pct=target, color=color, sort_order=order)
+        )
+
+    today = date.today()
+    buy_date = today - timedelta(days=220)
+    next_review = buy_date + timedelta(days=REVIEW_INTERVAL_DAYS)
+
+    positions = [
+        Position(
+            ticker="HEN",
+            name="Heineken N.V.",
+            sector="Akcje / Consumer Defensive",
+            thesis="Demo: mocna marka globalna, stabilne przepływy i potencjał poprawy marży.",
+            buy_price=82.00,
+            current_price=96.50,
+            buy_date=buy_date.isoformat(),
+            review_date=next_review.isoformat(),
+            currency="EUR",
+        ),
+        Position(
+            ticker="DTG",
+            name="Daimler Truck Holding AG",
+            sector="Akcje / Industrials",
+            thesis="Demo: ekspozycja na cykl ciężarówek, dyscyplina kosztowa i potencjał dywidendowy.",
+            buy_price=34.20,
+            current_price=31.80,
+            buy_date=(buy_date - timedelta(days=30)).isoformat(),
+            review_date=(next_review - timedelta(days=30)).isoformat(),
+            currency="EUR",
+        ),
+        Position(
+            ticker="FME",
+            name="Fresenius Medical Care AG",
+            sector="Akcje / Healthcare",
+            thesis="Demo: restrukturyzacja, defensywny popyt i możliwy powrót ROE do średniej historycznej.",
+            buy_price=42.50,
+            current_price=47.20,
+            buy_date=(buy_date - timedelta(days=60)).isoformat(),
+            review_date=(next_review - timedelta(days=60)).isoformat(),
+            currency="EUR",
+        ),
+    ]
+
+    inserted: dict[str, int] = {}
+    for position in positions:
+        inserted[position.ticker] = db.insert_position(position)
+
+    from src.rule_engine import calculate_return, categorize_with_thresholds
+
+    hen_position = db.get_position_by_id(inserted["HEN"])
+    if hen_position is not None:
+        return_pct = calculate_return(hen_position.buy_price, 96.50)
+        category, instruction = categorize_with_thresholds(
+            return_pct,
+            hen_position.sell_threshold_gain,
+            hen_position.sell_threshold_profit,
+            hen_position.sell_threshold_loss,
+        )
+        db.insert_review(
+            Review(
+                position_id=hen_position.id or inserted["HEN"],
+                review_date=(today - timedelta(days=7)).isoformat(),
+                price_then=96.50,
+                return_pct=return_pct,
+                category=category,
+                instruction=instruction,
+                pe_ratio=18.5,
+                dividend_yield=2.15,
+                debt_to_equity=0.72,
+                roe=13.4,
+                payout_ratio=48.0,
+                revenue_growth_3y=4.2,
+                notes="Demo: pierwsza rewizja pokazująca metryki bazowe.",
             )
+        )
 
-        today = date.today()
-        buy_date = today - timedelta(days=220)
-        next_review = buy_date + timedelta(days=REVIEW_INTERVAL_DAYS)
 
-        positions = [
-            Position(
-                ticker="HEN",
-                name="Heineken N.V.",
-                sector="Akcje / Consumer Defensive",
-                thesis="Demo: mocna marka globalna, stabilne przepływy i potencjał poprawy marży.",
-                buy_price=82.00,
-                current_price=96.50,
-                buy_date=buy_date.isoformat(),
-                review_date=next_review.isoformat(),
-                currency="EUR",
-            ),
-            Position(
-                ticker="DTG",
-                name="Daimler Truck Holding AG",
-                sector="Akcje / Industrials",
-                thesis="Demo: ekspozycja na cykl ciężarówek, dyscyplina kosztowa i potencjał dywidendowy.",
-                buy_price=34.20,
-                current_price=31.80,
-                buy_date=(buy_date - timedelta(days=30)).isoformat(),
-                review_date=(next_review - timedelta(days=30)).isoformat(),
-                currency="EUR",
-            ),
-            Position(
-                ticker="FME",
-                name="Fresenius Medical Care AG",
-                sector="Akcje / Healthcare",
-                thesis="Demo: restrukturyzacja, defensywny popyt i możliwy powrót ROE do średniej historycznej.",
-                buy_price=42.50,
-                current_price=47.20,
-                buy_date=(buy_date - timedelta(days=60)).isoformat(),
-                review_date=(next_review - timedelta(days=60)).isoformat(),
-                currency="EUR",
-            ),
-        ]
+def insert_position(position: Position, db_path: Path = DB_PATH) -> int:
+    return Database(db_path).insert_position(position)
 
-        inserted: dict[str, int] = {}
-        for position in positions:
-            inserted[position.ticker] = db.insert_position(position)
 
-        from src.rule_engine import calculate_return, categorize_with_thresholds
+def get_all_positions(
+    include_closed: bool = False, db_path: Path = DB_PATH
+) -> list[Position]:
+    return Database(db_path).get_all_positions(include_closed=include_closed)
 
-        hen_position = db.get_position_by_id(inserted["HEN"])
-        if hen_position is not None:
-            return_pct = calculate_return(hen_position.buy_price, 96.50)
-            category, instruction = categorize_with_thresholds(
-                return_pct,
-                hen_position.sell_threshold_gain,
-                hen_position.sell_threshold_profit,
-                hen_position.sell_threshold_loss,
-            )
-            db.insert_review(
-                Review(
-                    position_id=hen_position.id or inserted["HEN"],
-                    review_date=(today - timedelta(days=7)).isoformat(),
-                    price_then=96.50,
-                    return_pct=return_pct,
-                    category=category,
-                    instruction=instruction,
-                    pe_ratio=18.5,
-                    dividend_yield=2.15,
-                    debt_to_equity=0.72,
-                    roe=13.4,
-                    payout_ratio=48.0,
-                    revenue_growth_3y=4.2,
-                    notes="Demo: pierwsza rewizja pokazująca metryki bazowe.",
-                )
-            )
 
-    def insert_position(position: Position, db_path: Path = DB_PATH) -> int:
-        return Database(db_path).insert_position(position)
+def update_position(position: Position, db_path: Path = DB_PATH) -> None:
+    Database(db_path).update_position(position)
 
-    def get_all_positions(
-        include_closed: bool = False, db_path: Path = DB_PATH
-    ) -> list[Position]:
-        return Database(db_path).get_all_positions(include_closed=include_closed)
 
-    def update_position(position: Position, db_path: Path = DB_PATH) -> None:
-        Database(db_path).update_position(position)
+def delete_position(position_id: int, db_path: Path = DB_PATH) -> None:
+    Database(db_path).delete_position(position_id)
 
-    def delete_position(position_id: int, db_path: Path = DB_PATH) -> None:
-        Database(db_path).delete_position(position_id)
 
-    def insert_review(review: Review, db_path: Path = DB_PATH) -> int:
-        return Database(db_path).insert_review(review)
+def insert_review(review: Review, db_path: Path = DB_PATH) -> int:
+    return Database(db_path).insert_review(review)
 
-    def get_reviews_for_position(
-        position_id: int, db_path: Path = DB_PATH
-    ) -> list[Review]:
-        return Database(db_path).get_reviews_for_position(position_id)
 
-    def get_last_review_for_position(
-        position_id: int, db_path: Path = DB_PATH
-    ) -> Review | None:
-        return Database(db_path).get_last_review_for_position(position_id)
+def get_reviews_for_position(position_id: int, db_path: Path = DB_PATH) -> list[Review]:
+    return Database(db_path).get_reviews_for_position(position_id)
 
-    def insert_asset_category(category: AssetCategory, db_path: Path = DB_PATH) -> int:
-        return Database(db_path).insert_asset_category(category)
 
-    def get_all_asset_categories(db_path: Path = DB_PATH) -> list[AssetCategory]:
-        return Database(db_path).get_all_asset_categories()
+def get_last_review_for_position(
+    position_id: int, db_path: Path = DB_PATH
+) -> Review | None:
+    return Database(db_path).get_last_review_for_position(position_id)
 
-    def update_asset_category(category: AssetCategory, db_path: Path = DB_PATH) -> None:
-        Database(db_path).update_asset_category(category)
 
-    def upsert_market_data(
-        key: str, value: float, unit: str | None = None, db_path: Path = DB_PATH
-    ) -> None:
-        Database(db_path).upsert_market_data(key, value, unit)
+def insert_asset_category(category: AssetCategory, db_path: Path = DB_PATH) -> int:
+    return Database(db_path).insert_asset_category(category)
 
-    def get_market_data(key: str, db_path: Path = DB_PATH) -> MarketData | None:
-        return Database(db_path).get_market_data(key)
+
+def get_all_asset_categories(db_path: Path = DB_PATH) -> list[AssetCategory]:
+    return Database(db_path).get_all_asset_categories()
+
+
+def update_asset_category(category: AssetCategory, db_path: Path = DB_PATH) -> None:
+    Database(db_path).update_asset_category(category)
+
+
+def upsert_market_data(
+    key: str, value: float, unit: str | None = None, db_path: Path = DB_PATH
+) -> None:
+    Database(db_path).upsert_market_data(key, value, unit)
+
+
+def get_market_data(key: str, db_path: Path = DB_PATH) -> MarketData | None:
+    return Database(db_path).get_market_data(key)
