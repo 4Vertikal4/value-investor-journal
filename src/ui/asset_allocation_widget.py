@@ -208,6 +208,7 @@ class AssetAllocationWidget(QWidget):
         self.actual: dict[str, float] = {}
         self.delta: dict[str, float] = {}
         self.setMinimumSize(760, 560)
+        self.build_ui()
         self.refresh()
 
     def build_ui(self) -> None:
@@ -222,13 +223,11 @@ class AssetAllocationWidget(QWidget):
         layout = QVBoxLayout(tab)
         if QChart is not None and QChartView is not None and QPieSeries is not None:
             self.series = QPieSeries()
-            self.series.append("Asset allocation")
             self.series.setLabelsVisible(True)
-            self.series.setLabelsPosition(QPieSeries.LabelsPosition.Outside)
             self.chart = QChart()
             self.chart.addSeries(self.series)
             self.chart.setBackgroundVisible(False)
-            self.chart.setTheme(QChart.ChartTheme.Dark)
+            self.chart.setTheme(QChart.ChartTheme.ChartThemeDark)
             self.chart.legend().setLabelColor(QColor("#CCCCCC"))
             self.chart_view = QChartView(self.chart)
             self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
