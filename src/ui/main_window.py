@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
         self.about_action.triggered.connect(self.show_about)
         self.table.positionDoubleClicked.connect(self.update_details)
         self.table.selectionChangedForPosition.connect(self.update_details)
-        self.table.customContextMenuRequested.connect(self.open_context_menu)
+        self.table.contextMenuRequestedForPosition.connect(self.open_context_menu)
 
     def refresh_data(self) -> None:
         try:
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Błąd bazy", str(exc))
             return
         self.update_details(self.positions[0]) if self.positions else None
-        selected = self.table.selected_position
+        selected = self.table.selected_position()
         if selected and selected in self.positions:
             self.update_details(selected)
         total = self.database.sum_portfolio_value(include_closed=self.show_closed)
@@ -257,15 +257,15 @@ class MainWindow(QMainWindow):
         ret = calculate_return(position.buy_price, current)
         category, instruction = categorize_with_thresholds(
             ret,
-            position.threshold_gain,
-            position.threshold_profit,
-            position.threshold_loss,
+            position.sell_threshold_gain,
+            position.sell_threshold_profit,
+            position.sell_threshold_loss,
         )
-        style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["NEUTRAL"])
+        style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["NEUTRALNY"])
         self.detail_ticker_label.setText(f"{position.ticker} {position.name}")
         self.detail_sector_badge.setText(position.sector or "Brak sektora")
         self.detail_sector_badge.setStyleSheet(
-            f"background-color: {style['color']}; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold;"
+            f"background-color: {style['bg']}; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold;"
         )
         self.detail_labels["key_price"].setText(
             f"{position.buy_price:.2f} {position.currency}"
@@ -275,37 +275,18 @@ class MainWindow(QMainWindow):
         )
         self.detail_labels["return"].setText(f"{ret:.2f}%")
         self.detail_labels["return"].setStyleSheet(
-            f"color: {style['color']}; font-weight: bold;"
+            f"color: {style['fg']}; font-weight: bold;"
         )
         self.detail_labels["category"].setText(category)
-        self.detail_labels["category"].setStyleSheet(f"color: {style['color']};")
+        self.detail_labels["category"].setStyleSheet(f"color: {style['fg']};")
         self.detail_labels["instruction"].setText(instruction)
-        self.detail_labels["instruction"].setStyleSheet(f"color: {style['color']};")
-        self.detail_labels["next_review"].setText(
-            position.next_review_date.strftime("%Y-%m-%d")
-            if position.next_review_date
-            else "Brak"
-        )
+        self.detail_labels["instruction"].setStyleSheet(f"color: {style['fg']};")
+        self.detail_labels["next_review"].setText(position.review_date or "Brak")
         self.thesis_text.setText(
             position.thesis or "Brak zapisanej tezy inwestycyjnej."
         )
-        self.update_metrics_grid(position)
-        self.update_reviews_history(reviews)
-        self.table.select_position(position)
-        self.review_history_group.setEnabled(True)
-        self.detail_labels["instruction"].setText(instruction)
-        self.detail_labels["instruction"].setStyleSheet(f"color: {style['color']};")
-        self.detail_labels["next_review"].setText(
-            position.next_review_date.strftime("%Y-%m-%d")
-            if position.next_review_date
-            else "Brak"
-        )
-        self.thesis_text.setText(
-            position.thesis or "Brak zapisanej tezy inwestycyjnej."
-        )
-        self.update_metrics_grid(position)
-        self.update_reviews_history(reviews)
-        self.table.select_position(position)
+        self.update_metrics_grid(reviews)
+        self.update_reviews_history(reviews, position.currency)
         self.review_history_group.setEnabled(True)
 
     def get_review_date_label(self, review_date: str) -> None:
@@ -325,7 +306,7 @@ class MainWindow(QMainWindow):
             label.setText(review_date)
         return label
 
-    def update_metrics_grid(self, position: Position) -> None:
+    def update_metrics_grid(self, reviews: list[Review]) -> None:
         last = reviews[-1] if reviews else None
         previous = reviews[-2] if len(reviews) > 1 else None
         row = 0
@@ -335,13 +316,9 @@ class MainWindow(QMainWindow):
             self.metrics_grid.addWidget(label, row, col)
         row += 1
         for row, metric_name in enumerate(METRIC_FIELDS, start=1):
-            current_value = (
-                position.metrics.get(metric_name) if position.metrics else None
-            )
+            current_value = last.metric_value(metric_name) if last is not None else None
             previous_value = (
-                previous.metrics.get(metric_name)
-                if previous and previous.metrics
-                else None
+                previous.metric_value(metric_name) if previous is not None else None
             )
             change = compare_metric(metric_name, current_value, previous_value)
             color, emoji = get_trend_color(change)
@@ -372,11 +349,13 @@ class MainWindow(QMainWindow):
         for row, review in enumerate(reviews):
             values = [
                 review.review_date,
-                f"{review.price_than:.4f} {currency}",
-                format_return(review.return_pct),
+                f"{review.price_then:.4f} {currency}",
                 review.category,
             ]
-            style = CATEGORY_STYLES.get(review.category, CATEGORY_STYLES["NEUTRAL"])
+            style = CATEGORY_STYLES.get(
+                review.category,
+                CATEGORY_STYLES["NEUTRALNY"],
+            )
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if col in (1, 2):
@@ -464,76 +443,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Błąd statusu", str(exc))
             return
         self.refresh_data()
-
-    def delete_position(self, position: Position) -> None:
-        answer = QMessageBox.question(
-            self,
-            "Usuń pozycję",
-            f"Usuń pozycję {position.ticker} wraz z historią rewizji?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            self.database.delete_position(position.id or 0)
-        except Exception as exc:
-            QMessageBox.critical(self, "Błąd usuwania", str(exc))
-            return
-        self.refresh_data()
-
-    def import_csv(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Importuj CSV lightyear",
-            str(Path.home()),
-            "CSV (*.csv);;Wszystkie pliki (*)",
-        )
-        if not path:
-            return
-        try:
-            result = import_lightyear_csv(Path(path), self.database)
-        except Exception as exc:
-            QMessageBox.critical(self, "Import lightyear", str(exc))
-            return
-        QMessageBox.information(
-            self,
-            "Import lightyear",
-            f"Gotowo: {result.inserted} zaaktualizowano: {result.updated} pominięto: {result.skipped} błędów: {len(result.errors)}",
-        )
-        self.refresh_data()
-
-    def export_xlsx_file(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Eksport XLSX",
-            str(Path.home() / "dziennik_inwestora.xlsx"),
-            "Excel (*.xlsx)",
-        )
-        if not path:
-            return
-        try:
-            export_xlsx(Path(path), self.database)
-        except Exception as exc:
-            QMessageBox.critical(self, "Eksport XLSX", str(exc))
-            return
-        QMessageBox.information(self, "Eksport XLSX", "Eksport zakończony.")
-
-    def export_csv_file(self) -> None:
-        directory = QFileDialog.getExistingDirectory(
-            self, "Katalog eksportu CSV", str(Path.home())
-        )
-        if not directory:
-            return
-        try:
-            export_positions_csv(Path(directory) / "positions.csv", self.database)
-            export_reviews_csv(Path(directory) / "reviews.csv", self.database)
-        except Exception as exc:
-            QMessageBox.critical(self, "Eksport CSV", str(exc))
-            return
-        QMessageBox.information(
-            self, "Eksport CSV", "Wyeksportowano positions.csv i reviews.csv"
-        )
 
     def delete_position(self, position: Position) -> None:
         answer = QMessageBox.question(
