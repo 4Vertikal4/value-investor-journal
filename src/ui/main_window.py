@@ -228,6 +228,9 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Błąd bazy", str(exc))
             return
+
+        self.table.set_positions(self.positions)
+
         self.update_details(self.positions[0]) if self.positions else None
         selected = self.table.selected_position()
         if selected and selected in self.positions:
