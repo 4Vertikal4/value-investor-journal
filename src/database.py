@@ -14,7 +14,7 @@ from src.config import (
     STATUS_CLOSED,
     STATUS_OPEN,
 )
-from src.models import AssetCategory, MarketData, Position, Review
+from src.models import AssetCategory, MarketData, Position, PositionValuation, Review
 
 POSITIONS_SQL = """
 CREATE TABLE IF NOT EXISTS positions (
@@ -197,6 +197,7 @@ class Database:
             sell_threshold_loss = ?,
             status = ?,
             current_price = ?,
+            average_cost = ?,
             sell_date = ?,
             sell_price = ?,
             realized_gain = ?,
@@ -215,6 +216,7 @@ class Database:
             position.sell_threshold_loss,
             position.status,
             position.current_price,
+            position.average_cost,
             position.sell_date,
             position.sell_price,
             position.realized_gain,
@@ -447,14 +449,17 @@ class Database:
 
     def sum_portfolio_value(self, include_closed: bool = False) -> float:
         positions = self.get_all_positions(include_closed=include_closed)
-        return round(
-            sum(
-                position.market_value()
-                for position in positions
-                if include_closed or position.status != STATUS_CLOSED
-            ),
-            2,
-        )
+        total = 0.0
+
+        for position in positions:
+            if not include_closed and position.status == STATUS_CLOSED:
+                continue
+
+            market_value = PositionValuation.snapshot(position).market_value
+            if market_value is not None:
+                total += market_value
+
+        return round(total, 2)
 
     def due_positions(self, on_date: date | None = None) -> list[Position]:
         on_date = on_date or date.today()

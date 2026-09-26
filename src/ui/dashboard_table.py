@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QMenu, QTableView
 
 from src.config import CATEGORY_STYLES, STATUS_CLOSED
-from src.models import Position
+from src.models import Position, PositionValuation
 from src.rule_engine import calculate_return, categorize_with_thresholds, format_return
 
 
@@ -117,16 +117,21 @@ class PositionTableModel(QAbstractTableModel):
         return None
 
     @staticmethod
-    def _status_for_position(position: Position) -> tuple[str, str, float]:
-        current = position.display_price()
-        return_pct = calculate_return(position.buy_price, current)
+    def _status_for_position(
+        position: Position,
+    ) -> tuple[str, str, float | None]:
+        snapshot = PositionValuation.snapshot(position)
+
+        if snapshot.unrealized_return is None:
+            return "", "", None
+
         category, instruction = categorize_with_thresholds(
-            return_pct,
+            snapshot.unrealized_return,
             position.sell_threshold_gain,
             position.sell_threshold_profit,
             position.sell_threshold_loss,
         )
-        return category, instruction, return_pct
+        return category, instruction, snapshot.unrealized_return
 
     @staticmethod
     def _display_value(
