@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QSpinBox,
 )
 
 from src.config import (
@@ -50,6 +51,8 @@ class PositionDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.position = position
+        self._is_setting_values = False
+        self._average_cost_linked = False
         self.setModal(True)
         self.setWindowTitle("Edytuj pozycję" if position else "Dodaj pozycję")
         self.resize(560, 620)
@@ -74,16 +77,28 @@ class PositionDialog(QDialog):
             )
         )
 
+        self.isin_edit = QLineEdit()
+        self.isin_edit.setMaxLength(12)
+        self.isin_edit.setPlaceholderText("np. DE0005785802")
+
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Pełna nazwa spółki lub instrumentu")
 
         self.sector_edit = QLineEdit()
         self.sector_edit.setPlaceholderText("np. Akcje / Healthcare")
 
-        self.buy_price_spin = QDoubleSpinBox()
-        self.buy_price_spin.setDecimals(4)
-        self.buy_price_spin.setRange(0.0001, 999999.99)
-        self.buy_price_spin.setSingleStep(0.1)
+        self.initial_buy_price_spin = QDoubleSpinBox()
+        self.initial_buy_price_spin.setDecimals(4)
+        self.initial_buy_price_spin.setRange(0.0001, 999999.99)
+        self.initial_buy_price_spin.setSingleStep(0.1)
+
+        self.quantity_spin = QSpinBox()
+        self.quantity_spin.setRange(1, 2147483647)
+
+        self.average_cost_spin = QDoubleSpinBox()
+        self.average_cost_spin.setDecimals(4)
+        self.average_cost_spin.setRange(0.0001, 999999.99)
+        self.average_cost_spin.setSingleStep(0.1)
 
         self.currency_combo = QComboBox()
         self.currency_combo.addItems(SUPPORTED_CURRENCIES)
@@ -103,9 +118,12 @@ class PositionDialog(QDialog):
         review_date_widget.setLayout(review_date_row)
 
         form.addRow("Ticker *", self.ticker_edit)
+        form.addRow("ISIN *", self.isin_edit)
         form.addRow("Nazwa *", self.name_edit)
         form.addRow("Sektor", self.sector_edit)
-        form.addRow("Cena zakupu *", self.buy_price_spin)
+        form.addRow("Cena zakupu *", self.initial_buy_price_spin)
+        form.addRow("Ilość *", self.quantity_spin)
+        form.addRow("Średni koszt *", self.average_cost_spin)
         form.addRow("Waluta", self.currency_combo)
         form.addRow("Data zakupu *", self.buy_date_edit)
         form.addRow("Data rewizji *", review_date_widget)
@@ -136,6 +154,10 @@ class PositionDialog(QDialog):
         main_layout.addWidget(self.button_box)
 
     def _connect_signals(self) -> None:
+        self.initial_buy_price_spin.valueChanged.connect(
+            self._on_initial_buy_price_changed
+        )
+        self.average_cost_spin.valueChanged.connect(self._on_average_cost_changed)
         self.ticker_edit.textChanged.connect(self._uppercase_ticker)
         self.plus_year_button.clicked.connect(self._set_review_plus_year)
         self.button_box.accepted.connect(self._try_accept)
@@ -150,27 +172,56 @@ class PositionDialog(QDialog):
         return spin
 
     def _set_defaults(self) -> None:
+        self._is_setting_values = True
+        self._average_cost_linked = True
+
         today = QDate.currentDate()
         self.buy_date_edit.setDate(today)
         self.review_date_edit.setDate(today.addDays(REVIEW_INTERVAL_DAYS))
+        self.average_cost_spin.setValue(self.initial_buy_price_spin.value())
         self.currency_combo.setCurrentText(DEFAULT_CURRENCY)
         self.profit_threshold_spin.setValue(DEFAULT_SELL_THRESHOLD_PROFIT * 100)
         self.gain_threshold_spin.setValue(DEFAULT_SELL_THRESHOLD_GAIN * 100)
         self.loss_threshold_spin.setValue(DEFAULT_SELL_THRESHOLD_LOSS * 100)
 
+        self._is_setting_values = False
+
+    def _on_initial_buy_price_changed(self, value: float) -> None:
+        if self._is_setting_values:
+            return
+        if self._average_cost_linked:
+            self._is_setting_values = True
+            self.average_cost_spin.setValue(value)
+            self._is_setting_values = False
+
+    def _on_average_cost_changed(self, value: float) -> None:
+        if self._is_setting_values:
+            return
+        self._average_cost_linked = False
+
     def _load_position(self, position: Position) -> None:
+        self._is_setting_values = True
+        self._average_cost_linked = False
         self.ticker_edit.setText(position.ticker)
         self.ticker_edit.setEnabled(False)
-        self.name_edit.setText(position.name)
+        self.isin_edit.setText(position.isin)
+        self.isin_edit.setEnabled(False)
+        self.name_edit.setText(position.name or "")
         self.sector_edit.setText(position.sector or "")
-        self.buy_price_spin.setValue(position.buy_price)
+        self.initial_buy_price_spin.setValue(position.initial_buy_price)
+        self.initial_buy_price_spin.setEnabled(False)
+        self.quantity_spin.setValue(position.quantity)
+        self.quantity_spin.setEnabled(False)
+        self.average_cost_spin.setValue(position.average_cost)
         self.currency_combo.setCurrentText(position.currency)
-        self.buy_date_edit.setDate(iso_to_qdate(position.buy_date))
+        self.buy_date_edit.setDate(iso_to_qdate(position.initial_buy_date))
+        self.buy_date_edit.setEnabled(False)
         self.review_date_edit.setDate(iso_to_qdate(position.review_date))
         self.profit_threshold_spin.setValue(position.sell_threshold_profit * 100)
         self.gain_threshold_spin.setValue(position.sell_threshold_gain * 100)
         self.loss_threshold_spin.setValue(position.sell_threshold_loss * 100)
         self.thesis_edit.setPlainText(position.thesis or "")
+        self._is_setting_values = False
 
     def _uppercase_ticker(self, text: str) -> None:
         upper = text.upper()
@@ -192,7 +243,7 @@ class PositionDialog(QDialog):
 
     def _validate(self) -> bool:
         valid = True
-        for widget in (self.ticker_edit, self.name_edit):
+        for widget in (self.ticker_edit, self.isin_edit, self.name_edit):
             is_empty = not widget.text().strip()
             self._mark_error(widget, is_empty)
             valid = valid and not is_empty
@@ -228,20 +279,29 @@ class PositionDialog(QDialog):
     def get_position(self) -> Position:
         status = self.position.status if self.position else STATUS_OPEN
         current_price = self.position.current_price if self.position else None
+        sell_date = self.position.sell_date if self.position else None
+        sell_price = self.position.sell_price if self.position else None
+        realized_gain = self.position.realized_gain if self.position else None
         position_id = self.position.id if self.position else None
         return Position(
             id=position_id,
             ticker=self.ticker_edit.text().strip().upper(),
+            isin=self.isin_edit.text().strip().upper(),
             name=self.name_edit.text().strip(),
             sector=self.sector_edit.text().strip() or None,
             thesis=self.thesis_edit.toPlainText().strip() or None,
-            buy_price=self.buy_price_spin.value(),
-            buy_date=qdate_to_iso(self.buy_date_edit.date()),
+            initial_buy_price=self.initial_buy_price_spin.value(),
+            initial_buy_date=qdate_to_iso(self.buy_date_edit.date()),
+            quantity=self.quantity_spin.value(),
+            average_cost=self.average_cost_spin.value(),
             review_date=qdate_to_iso(self.review_date_edit.date()),
             currency=self.currency_combo.currentText(),
             sell_threshold_gain=self.gain_threshold_spin.value() / 100,
             sell_threshold_profit=self.profit_threshold_spin.value() / 100,
             sell_threshold_loss=self.loss_threshold_spin.value() / 100,
             status=status,
+            sell_date=sell_date,
+            sell_price=sell_price,
+            realized_gain=realized_gain,
             current_price=current_price,
         )

@@ -20,18 +20,24 @@ POSITIONS_SQL = """
 CREATE TABLE IF NOT EXISTS positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
+    isin TEXT NOT NULL,
+    name TEXT,
     sector TEXT,
     thesis TEXT,
-    buy_price REAL NOT NULL,
-    buy_date TEXT NOT NULL,
-    review_date TEXT NOT NULL,
-    currency TEXT DEFAULT 'USD',
+    currency TEXT NOT NULL DEFAULT 'USD',
+    initial_buy_price REAL NOT NULL,
+    initial_buy_date TEXT NOT NULL,
     sell_threshold_gain REAL DEFAULT 0.20,
     sell_threshold_profit REAL DEFAULT 0.10,
     sell_threshold_loss REAL DEFAULT -0.10,
+    quantity INTEGER NOT NULL,
+    average_cost REAL NOT NULL,
+    current_price REAL,
     status TEXT DEFAULT 'OPEN',
-    current_price REAL
+    sell_date TEXT,
+    sell_price REAL,
+    realized_gain REAL,
+    review_date TEXT NOT NULL
 );
 """
 
@@ -120,9 +126,26 @@ class Database:
     def insert_position(self, position: Position) -> int:
         sql = """
         INSERT INTO positions (
-            ticker, name, sector, thesis, buy_price, buy_date, review_date, currency,
-            sell_threshold_gain, sell_threshold_profit, sell_threshold_loss, status, current_price
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ticker,
+            isin,
+            name,
+            currency,
+            sector,
+            thesis,
+            initial_buy_price,
+            initial_buy_date,
+            sell_threshold_gain,
+            sell_threshold_profit,
+            sell_threshold_loss,
+            quantity,
+            average_cost,
+            current_price,
+            status,
+            sell_date,
+            sell_price,
+            realized_gain,
+            review_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         try:
             with self.connection() as conn:
@@ -161,29 +184,44 @@ class Database:
     def update_position(self, position: Position) -> None:
         if position.id is None:
             raise ValueError("Pozycja musi mieć id przed aktualizacją.")
+
         sql = """
         UPDATE positions
-        SET name = ?, sector = ?, thesis = ?, buy_price = ?, buy_date = ?, review_date = ?,
-            currency = ?, sell_threshold_gain = ?, sell_threshold_profit = ?, sell_threshold_loss = ?,
-            status = ?, current_price = ?
+        SET isin = ?,
+            name = ?,
+            sector = ?,
+            thesis = ?,
+            currency = ?,
+            sell_threshold_gain = ?,
+            sell_threshold_profit = ?,
+            sell_threshold_loss = ?,
+            status = ?,
+            current_price = ?,
+            sell_date = ?,
+            sell_price = ?,
+            realized_gain = ?,
+            review_date = ?
         WHERE id = ?
         """
 
         values = (
-            position.name.strip(),
+            position.isin.strip(),
+            position.name.strip() if position.name else None,
             position.sector,
             position.thesis,
-            position.buy_price,
-            position.buy_date,
-            position.review_date,
             position.currency,
             position.sell_threshold_gain,
             position.sell_threshold_profit,
             position.sell_threshold_loss,
             position.status,
             position.current_price,
+            position.sell_date,
+            position.sell_price,
+            position.realized_gain,
+            position.review_date,
             position.id,
         )
+
         try:
             with self.connection() as conn:
                 conn.execute(sql, values)
