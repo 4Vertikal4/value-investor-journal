@@ -1,9 +1,11 @@
+
 from __future__ import annotations
+
 from dataclasses import replace
 from typing import Any
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -85,7 +87,6 @@ class AssetTilesWidget(QWidget):
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#2E2E2E"))
         painter.fillRect(self.rect(), QColor("#2A2A2A"))
         rects = self.tile_rects()
         for index, (category, rect) in enumerate(zip(self.categories, rects)):
@@ -93,7 +94,7 @@ class AssetTilesWidget(QWidget):
 
     def tile_rects(self) -> list[QRect]:
         count = max(len(self.categories), 1)
-        columns = 2 if count == 1 else 2
+        columns = min(2, count)
         rows = count // columns + (count % columns > 0)
         spacing = 12
         margin = 10
@@ -123,20 +124,19 @@ class AssetTilesWidget(QWidget):
         painter.setPen(QColor("#FFFFFF"))
         painter.drawText(rect.adjusted(10, 10, -10, -10), Qt.AlignTop, category.name)
         painter.setPen(QColor("#A4A4A4") if hover else QColor("#A4A4A4"))
+        actual = self.actual.get(category.name, category.actual_pct)
         painter.drawText(
             rect.adjusted(10, 25, -10, -10),
             Qt.AlignTop,
-            f"{format_pct(category.allocation * 100)}%",
+            f"Aktualnie: {format_pct(actual)}",
         )
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor("#3DAEEF") if hover else QColor("#4AA4FF"))
-        percentage = category.allocation * 100
-        rect_width = int(rect.width() * (percentage / 100))
+        rect_width = int((rect.width() - 10) * min(max(actual, 0.0), 1.0))
         rect_height = 4
         x = rect.x() + 5
         y = rect.bottom() - 10 - rect_height
         painter.drawRect(x, y, rect_width, rect_height)
-        painter.drawPath(path)
 
 
 class TargetEditDialog(QDialog):
@@ -145,7 +145,7 @@ class TargetEditDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.categories = categories
-        self.spins: dict[int, QDoubleSpinBox] = {}
+        self.spins: dict[str, QDoubleSpinBox] = {}
         self.setWindowTitle("Edytuj targety alokacji")
         self.setModal(True)
         self.resize(420, 300)
@@ -157,10 +157,10 @@ class TargetEditDialog(QDialog):
             spin.setMaximum(100.0)
             spin.setSuffix("%")
             spin.setValue(category.target_pct * 100)
-            spin.valueChanged.connect(lambda value, row=row: self.update_total(row))
+            spin.valueChanged.connect(self.update_total)
             grid.addWidget(label, row, 0)
             grid.addWidget(spin, row, 1)
-            self.spins[category.id] = spin
+            self.spins[category.name] = spin
         layout.addLayout(grid)
         self.lbl_total = QLabel("Suma targetów: 0.00%")
         layout.addWidget(self.lbl_total)
@@ -175,17 +175,20 @@ class TargetEditDialog(QDialog):
         layout.addWidget(button_box)
         self.btn_save.clicked.connect(self.accept)
         self.btn_cancel.clicked.connect(self.reject)
+        self.update_total()
 
-    def update_total(self, row: int) -> None:
+    def update_total(self, _value: float = 0.0) -> None:
         total = sum(spin.value() for spin in self.spins.values())
         self.lbl_total.setText(f"Suma targetów: {total:.2f}%")
-        if total > 100.0:
+        is_valid = abs(total - 100.0) <= 0.01
+        self.btn_save.setEnabled(is_valid)
+        if not is_valid:
             self.lbl_total.setStyleSheet("color: red; font-weight: bold;")
         else:
-            self.lbl_total.setStyleSheet("color: None;")
+            self.lbl_total.setStyleSheet("")
 
     def accept(self) -> None:
-        if sum(spin.value() for spin in self.spins.values()) != 100.0:
+        if abs(sum(spin.value() for spin in self.spins.values()) - 100.0) > 0.01:
             QMessageBox.warning(self, "Błąd", "Suma targetów musi wynosić 100%.")
             return
         super().accept()
@@ -193,7 +196,7 @@ class TargetEditDialog(QDialog):
     def updated_categories(self) -> list[AssetCategory]:
         result: list[AssetCategory] = []
         for category in self.categories:
-            new_pct = self.spins[category.id].value() / 100
+            new_pct = self.spins[category.name].value() / 100
             if abs(category.target_pct - new_pct) > 1e-6:
                 category = replace(category, target_pct=new_pct)
                 result.append(category)
@@ -261,10 +264,15 @@ class AssetAllocationWidget(QWidget):
     def refresh(self) -> None:
         self.categories = self.database.get_all_asset_categories()
         positions = self.database.get_all_positions(include_closed=False)
-        self.actual = recalculate_actual_allocation(positions)
+        calculated = recalculate_actual_allocation(positions)
+        self.actual = {
+            category.name: calculated.get(category.name, 0.0)
+            for category in self.categories
+        }
         target = {category.name: category.target_pct for category in self.categories}
         self.delta = get_rebalance_delta(target, self.actual)
         self.refresh_chart()
+        self.refresh_table()
         self.tiles.set_data(self.categories, self.actual, self.delta)
 
     def refresh_chart(self) -> None:
@@ -272,7 +280,7 @@ class AssetAllocationWidget(QWidget):
             return
         self.series.clear()
         for category in self.categories:
-            value = self.actual.get(category.name, category.actual_pct)
+            value = self.actual.get(category.name, 0.0)
             if value < 0:
                 continue
             pie_slice = self.series.append(
@@ -285,7 +293,7 @@ class AssetAllocationWidget(QWidget):
     def refresh_table(self) -> None:
         self.table.setRowCount(len(self.categories))
         for row, category in enumerate(self.categories):
-            actual = self.actual.get(category.name, category.actual_pct)
+            actual = self.actual.get(category.name, 0.0)
             delta = self.delta.get(category.name, category.target_pct - actual)
             values = (
                 category.name,

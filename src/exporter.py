@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import shutil
@@ -95,3 +96,4 @@ def backup_database(path: Path, database: Database) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(database.db_path, path)
     return path
+

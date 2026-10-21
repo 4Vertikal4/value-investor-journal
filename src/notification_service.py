@@ -1,3 +1,5 @@
+
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -128,3 +130,4 @@ class NotificationService(QObject):
         app = QApplication.instance()
         if app is not None:
             app.quit()
+

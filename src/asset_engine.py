@@ -1,9 +1,11 @@
+
 from __future__ import annotations
 
 from collections import defaultdict
 from typing import Iterable
 
-from src.models import Position
+from src.config import STATUS_CLOSED
+from src.models import Position, PositionValuation
 
 
 def infer_asset_category(position: Position) -> str:
@@ -30,10 +32,15 @@ def infer_asset_category(position: Position) -> str:
 def recalculate_actual_allocation(positions: Iterable[Position]) -> dict[str, float]:
     totals: dict[str, float] = defaultdict(float)
     for position in positions:
-        if position.status == "CLOSED":
+        if position.status == STATUS_CLOSED:
             continue
         category = infer_asset_category(position)
-        totals[category] += max(position.market_value(), 0.0)
+        # Keep all valuation maths in PositionValuation.  A missing market price
+        # is unknown, not zero, so it must not reduce another asset's value.
+        totals.setdefault(category, 0.0)
+        market_value = PositionValuation.snapshot(position).market_value
+        if market_value is not None:
+            totals[category] += max(market_value, 0.0)
 
     portfolio_total = sum(totals.values())
     if portfolio_total <= 0:

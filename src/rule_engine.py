@@ -1,3 +1,5 @@
+
+
 from __future__ import annotations
 
 from src.config import (
@@ -45,3 +47,7 @@ def categorize_with_thresholds(
 
 def format_return(return_pct: float) -> str:
     return f"{return_pct * 100:.2f}%"
+
+
+
+

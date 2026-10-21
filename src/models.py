@@ -1,3 +1,5 @@
+
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +10,7 @@ from src.config import (
     DEFAULT_SELL_THRESHOLD_GAIN,
     DEFAULT_SELL_THRESHOLD_LOSS,
     DEFAULT_SELL_THRESHOLD_PROFIT,
+    STATUS_CLOSED,
     STATUS_OPEN,
 )
 
@@ -50,6 +53,44 @@ class Position:
 
     id: int | None = None
 
+    def validate(self) -> None:
+        """Validate domain invariants before a position is persisted."""
+        if not self.ticker.strip():
+            raise ValueError("Ticker nie może być pusty.")
+        if not self.isin.strip():
+            raise ValueError("ISIN nie może być pusty.")
+        if self.initial_buy_price <= 0:
+            raise ValueError("Pierwotna cena zakupu musi być większa od zera.")
+        if self.average_cost <= 0:
+            raise ValueError("Średni koszt musi być większy od zera.")
+        if self.quantity < 0:
+            raise ValueError("Liczba akcji nie może być ujemna.")
+        if self.current_price is not None and self.current_price <= 0:
+            raise ValueError("Aktualna cena musi być większa od zera.")
+        if self.status not in {STATUS_OPEN, STATUS_CLOSED}:
+            raise ValueError("Status musi mieć wartość OPEN albo CLOSED.")
+        if self.status == STATUS_OPEN and self.quantity == 0:
+            raise ValueError("Otwarta pozycja musi mieć co najmniej jedną akcję.")
+        if self.status == STATUS_CLOSED:
+            if self.quantity != 0:
+                raise ValueError("Zamknięta pozycja musi mieć quantity = 0.")
+            if (
+                self.sell_date is None
+                or self.sell_price is None
+                or self.realized_gain is None
+            ):
+                raise ValueError(
+                    "Zamknięta pozycja wymaga daty, ceny sprzedaży i zrealizowanego zwrotu."
+                )
+        if not (
+            self.sell_threshold_loss
+            < self.sell_threshold_profit
+            < self.sell_threshold_gain
+        ):
+            raise ValueError(
+                "Progi muszą spełniać: strata < zysk < wysoki zysk."
+            )
+
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "Position":
         current_price = _row_get(row, "current_price")
@@ -57,7 +98,7 @@ class Position:
         return cls(
             id=_row_get(row, "id"),
             ticker=str(_row_get(row, "ticker", "")).upper(),
-            isin=str(_row_get(row, "isin", "")),
+            isin=str(_row_get(row, "isin", "")).upper().strip(),
             name=_row_get(row, "name"),
             currency=str(_row_get(row, "currency", DEFAULT_CURRENCY)),
             sector=_row_get(row, "sector"),
@@ -98,7 +139,7 @@ class Position:
     def to_db_tuple(self) -> tuple[Any, ...]:
         return (
             self.ticker.upper().strip(),
-            self.isin.strip(),
+            self.isin.upper().strip(),
             self.name.strip() if self.name else None,
             self.currency,
             self.sector,
@@ -162,6 +203,14 @@ class PositionValuation:
     """Czysta logika wyceny. Nie modyfikuje Position."""
 
     @staticmethod
+    def realized_return(position: Position, sell_price: float) -> float:
+        if position.average_cost <= 0:
+            raise ValueError("Średni koszt musi być większy od zera.")
+        if sell_price <= 0:
+            raise ValueError("Cena sprzedaży musi być większa od zera.")
+        return (sell_price - position.average_cost) / position.average_cost
+
+    @staticmethod
     def snapshot(position: Position) -> PositionSnapshot:
         cost_basis = position.quantity * position.average_cost
 
@@ -169,7 +218,11 @@ class PositionValuation:
         target_profit = position.average_cost * (1 + position.sell_threshold_profit)
         target_loss = position.average_cost * (1 + position.sell_threshold_loss)
 
-        if position.current_price is None or position.quantity <= 0:
+        if (
+            position.current_price is None
+            or position.current_price <= 0
+            or position.quantity <= 0
+        ):
             return PositionSnapshot(
                 cost_basis=cost_basis,
                 market_value=None,
@@ -195,13 +248,9 @@ class PositionValuation:
             else None
         )
 
-        distance_to_gain = (
-            target_gain - position.current_price
-        ) / position.current_price
+        distance_to_gain = (target_gain - position.current_price) / position.current_price
 
-        distance_to_loss = (
-            position.current_price - target_loss
-        ) / position.current_price
+        distance_to_loss = (position.current_price - target_loss) / position.current_price
 
         return PositionSnapshot(
             cost_basis=cost_basis,

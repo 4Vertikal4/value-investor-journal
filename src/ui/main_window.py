@@ -1,6 +1,8 @@
+
+
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -45,9 +48,10 @@ from src.exporter import (
 )
 from src.importer_lightyear import import_lightyear_csv
 from src.metrics_engine import compare_metric, describe_metric_change, get_trend_color
-from src.models import Position, Review
-from src.rule_engine import calculate_return, categorize_with_thresholds, format_return
+from src.models import Position, PositionValuation, Review
+from src.rule_engine import categorize_with_thresholds, format_return
 from src.ui.asset_allocation_widget import AssetAllocationWidget
+from src.ui.close_position_dialog import ClosePositionDialog
 from src.ui.dashboard_table import DashboardTable
 from src.ui.position_dialog import PositionDialog
 from src.ui.review_dialog import ReviewDialog
@@ -57,7 +61,7 @@ class MainWindow(QMainWindow):
     def __init__(self, database: Database, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.database = database
-        self.positions_list: list[Position] = []
+        self.positions: list[Position] = []
         self.show_closed = False
         self.setWindowTitle(APP_NAME)
         self.resize(1200, 760)
@@ -88,7 +92,8 @@ class MainWindow(QMainWindow):
         self.refresh_metrics_action = QAction("Odśwież metryki", self)
         self.notifications_action = QAction("Powiadomienia", self)
         self.notifications_action.setCheckable(True)
-        self.exit_action = QAction("Wyjdz", self)
+        self.notifications_action.setChecked(True)
+        self.exit_action = QAction("Wyjdź", self)
         self.about_action = QAction(UI["about"], self)
 
     def build_ui(self) -> None:
@@ -124,7 +129,7 @@ class MainWindow(QMainWindow):
         numbers_layout = QFormLayout(numbers_frame)
         self.detail_labels = {}
         for key, label in [
-            ("key_price", "Cena zakupu"),
+            ("key_price", "Średni koszt"),
             ("current_price", "Aktualna"),
             ("return", "Zwrot"),
             ("category", "Kategoria"),
@@ -162,7 +167,6 @@ class MainWindow(QMainWindow):
         self.review_history_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
         )
-        self.review_history_table.horizontalHeader().setVisible(False)
         history_layout.addWidget(self.review_history_table)
         history_layout.addStretch()
         layout.addWidget(self.review_history_group)
@@ -215,6 +219,7 @@ class MainWindow(QMainWindow):
         self.show_closed_action.toggled.connect(self.toggle_closed)
         self.refresh_metrics_action.triggered.connect(self.update_metrics)
         # self.notifications_action.toggled.connect(self.show_notifications)
+        self.exit_action.triggered.connect(self.close)
         self.about_action.triggered.connect(self.show_about)
         self.table.positionDoubleClicked.connect(self.update_details)
         self.table.selectionChangedForPosition.connect(self.update_details)
@@ -231,10 +236,8 @@ class MainWindow(QMainWindow):
 
         self.table.set_positions(self.positions)
 
-        self.update_details(self.positions[0]) if self.positions else None
         selected = self.table.selected_position()
-        if selected and selected in self.positions:
-            self.update_details(selected)
+        self.update_details(selected)
         total = self.database.sum_portfolio_value(include_closed=self.show_closed)
         self.statusBar().showMessage(
             f"Liczba pozycji: {len(self.positions)} | Suma portfela: {total:.2f} | Ostatnia aktualizacja: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
@@ -256,33 +259,52 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Błąd bazy", str(exc))
             return
-        current = position.display_price()
-        ret = calculate_return(position.buy_price, current)
-        category, instruction = categorize_with_thresholds(
-            ret,
-            position.sell_threshold_gain,
-            position.sell_threshold_profit,
-            position.sell_threshold_loss,
+        snapshot = PositionValuation.snapshot(position)
+        return_pct = (
+            position.realized_gain
+            if position.status == STATUS_CLOSED
+            else snapshot.unrealized_return
         )
-        style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["NEUTRALNY"])
-        self.detail_ticker_label.setText(f"{position.ticker} {position.name}")
+        if return_pct is None:
+            category = None
+            instruction = None
+        else:
+            category, instruction = categorize_with_thresholds(
+                return_pct,
+                position.sell_threshold_gain,
+                position.sell_threshold_profit,
+                position.sell_threshold_loss,
+            )
+        style = CATEGORY_STYLES.get(
+            category or "NEUTRALNY", CATEGORY_STYLES["NEUTRALNY"]
+        )
+        title = position.ticker
+        if position.name:
+            title += f" — {position.name}"
+        self.detail_ticker_label.setText(title)
         self.detail_sector_badge.setText(position.sector or "Brak sektora")
         self.detail_sector_badge.setStyleSheet(
             f"background-color: {style['bg']}; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold;"
         )
         self.detail_labels["key_price"].setText(
-            f"{position.buy_price:.2f} {position.currency}"
+            f"{position.average_cost:.2f} {position.currency}"
         )
         self.detail_labels["current_price"].setText(
-            f"{current:.2f} {position.currency}"
+            (
+                f"{position.current_price:.2f} {position.currency}"
+                if position.current_price is not None
+                else "Brak ceny"
+            )
         )
-        self.detail_labels["return"].setText(f"{ret:.2f}%")
+        self.detail_labels["return"].setText(
+            format_return(return_pct) if return_pct is not None else "—"
+        )
         self.detail_labels["return"].setStyleSheet(
             f"color: {style['fg']}; font-weight: bold;"
         )
-        self.detail_labels["category"].setText(category)
+        self.detail_labels["category"].setText(category or "Brak ceny")
         self.detail_labels["category"].setStyleSheet(f"color: {style['fg']};")
-        self.detail_labels["instruction"].setText(instruction)
+        self.detail_labels["instruction"].setText(instruction or "Brak ceny")
         self.detail_labels["instruction"].setStyleSheet(f"color: {style['fg']};")
         self.detail_labels["next_review"].setText(position.review_date or "Brak")
         self.thesis_text.setText(
@@ -292,17 +314,17 @@ class MainWindow(QMainWindow):
         self.update_reviews_history(reviews, position.currency)
         self.review_history_group.setEnabled(True)
 
-    def get_review_date_label(self, review_date: str) -> None:
+    def get_review_date_label(self, review_date: str) -> QLabel:
         label = QLabel()
         label.setText("Nieznana data")
         try:
             parsed = date.fromisoformat(review_date)
         except ValueError:
-            return
-        if parsed.date() == date.today():
+            return label
+        if parsed == date.today():
             label.setText("Dzisiaj")
             label.setStyleSheet("color: #FFA500; font-weight: bold;")
-        elif parsed.date() == date.today() - timedelta(days=1):
+        elif parsed == date.today() - timedelta(days=1):
             label.setText("Wczoraj")
             label.setStyleSheet("color: #FFA500; font-weight: bold;")
         else:
@@ -310,10 +332,14 @@ class MainWindow(QMainWindow):
         return label
 
     def update_metrics_grid(self, reviews: list[Review]) -> None:
-        last = reviews[-1] if reviews else None
-        previous = reviews[-2] if len(reviews) > 1 else None
+        self.clear_metrics_grid()
+        # Database returns reviews newest first.
+        last = reviews[0] if reviews else None
+        previous = reviews[1] if len(reviews) > 1 else None
         row = 0
-        for col, title in enumerate(("Wskaźnik", "Wartość", "Poprzednio")):
+        for col, title in enumerate(
+            ("Wskaźnik", "Wartość", "Poprzednio", "Trend")
+        ):
             label = QLabel(title)
             label.setStyleSheet("font-weight: bold; color: #FFFFFF;")
             self.metrics_grid.addWidget(label, row, col)
@@ -325,6 +351,9 @@ class MainWindow(QMainWindow):
             )
             change = compare_metric(metric_name, current_value, previous_value)
             color, emoji = get_trend_color(change)
+            description = describe_metric_change(
+                metric_name, current_value, previous_value
+            )
             label = QLabel(METRIC_LABELS.get(metric_name, metric_name))
             unit = METRIC_UNITS.get(metric_name, "")
             current_text = (
@@ -335,9 +364,9 @@ class MainWindow(QMainWindow):
             )
             self.metrics_grid.addWidget(label, row, 0)
             for col, value in enumerate(
-                (current_text, previous_text, f"{emoji} {change}")
+                (current_text, previous_text, f"{emoji} {description}")
             ):
-                if col == 1:
+                if col == 0:
                     label = QLabel(value)
                     label.setStyleSheet(f"color: {color}; font-weight: bold;")
                 elif col == 2:
@@ -365,7 +394,7 @@ class MainWindow(QMainWindow):
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                     )
-                if col in (1, 3):
+                if col in (1, 2):
                     item.setForeground(QColor(style["fg"]))
                 font = QFont()
                 font.setBold(True)
@@ -379,6 +408,9 @@ class MainWindow(QMainWindow):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+
+    def clear_metrics_grid(self) -> None:
+        self.clear_layout(self.metrics_grid)
 
     def add_position(self) -> None:
         dialog = PositionDialog(parent=self)
@@ -405,12 +437,21 @@ class MainWindow(QMainWindow):
             self.database.update_position(updated)
         except Exception as exc:
             QMessageBox.critical(self, "Błąd edycji", str(exc))
+            return
+        self.refresh_data()
 
     def add_review_for_selected(self) -> None:
         position = self.table.selected_position()
         self.add_review(position)
 
     def add_review(self, position: Position | None = None) -> None:
+        if position is not None and position.status == STATUS_CLOSED:
+            QMessageBox.information(
+                self,
+                "Rewizja",
+                "Nie można dodać rewizji do zamkniętej pozycji.",
+            )
+            return
         selected_id = position.id if position is not None else None
         dialog = ReviewDialog(self.database, selected_id, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -419,7 +460,10 @@ class MainWindow(QMainWindow):
     def open_context_menu(self, position: Position, global_pos: Any) -> None:
         menu = QMenu(self)
         review_action = menu.addAction("Dodaj rewizję")
+        review_action.setEnabled(position.status != STATUS_CLOSED)
         edit_action = menu.addAction("Edytuj")
+        price_action = menu.addAction("Ustaw cenę rynkową")
+        price_action.setEnabled(position.status != STATUS_CLOSED)
         close_text = (
             "Otwórz ponownie" if position.status == STATUS_CLOSED else "Zamknij pozycję"
         )
@@ -431,19 +475,76 @@ class MainWindow(QMainWindow):
             self.add_review(position)
         elif selected == edit_action:
             self.edit_position(position)
+        elif selected == price_action:
+            self.set_market_price(position)
         elif selected == close_action:
             self.toggle_position_status(position)
         elif selected == delete_action:
             self.delete_position(position)
 
     def toggle_position_status(self, position: Position) -> None:
+        if position.id is None:
+            QMessageBox.critical(self, "Błąd statusu", "Pozycja nie ma identyfikatora.")
+            return
         try:
             if position.status == STATUS_CLOSED:
-                self.database.reopen_position(position.id or 0)
+                quantity, accepted = QInputDialog.getInt(
+                    self,
+                    "Otwórz pozycję ponownie",
+                    "Nowa ilość akcji:",
+                    1,
+                    1,
+                    2147483647,
+                )
+                if not accepted:
+                    return
+                average_cost, accepted = QInputDialog.getDouble(
+                    self,
+                    "Otwórz pozycję ponownie",
+                    f"Nowy średni koszt ({position.currency}):",
+                    position.average_cost,
+                    0.0001,
+                    999999999.99,
+                    4,
+                )
+                if not accepted:
+                    return
+                self.database.reopen_position(
+                    position.id, quantity, average_cost
+                )
             else:
-                self.database.close_position(position.id or 0)
+                dialog = ClosePositionDialog(position, self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self.database.close_position(
+                    position.id,
+                    sell_price=dialog.sell_price,
+                    sell_date=dialog.sell_date,
+                )
         except Exception as exc:
             QMessageBox.critical(self, "Błąd statusu", str(exc))
+            return
+        self.refresh_data()
+
+    def set_market_price(self, position: Position) -> None:
+        if position.id is None:
+            QMessageBox.critical(self, "Cena rynkowa", "Pozycja nie ma identyfikatora.")
+            return
+        value, accepted = QInputDialog.getDouble(
+            self,
+            f"Cena rynkowa — {position.ticker}",
+            f"Aktualna cena ({position.currency}):",
+            position.current_price or position.average_cost,
+            0.0001,
+            999999999.99,
+            4,
+        )
+        if not accepted:
+            return
+        try:
+            self.database.update_position_current_price(position.id, value)
+        except Exception as exc:
+            QMessageBox.critical(self, "Cena rynkowa", str(exc))
             return
         self.refresh_data()
 
@@ -481,7 +582,8 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Import lightyear",
-            f"Gotowo: {result.inserted} zaaktualizowano: {result.updated} pominięto: {result.skipped} błędów: {len(result.errors)}",
+            f"Dodano: {result.inserted}, zaktualizowano: {result.updated}, "
+            f"pominięto: {result.skipped}, błędów: {len(result.errors)}",
         )
         self.refresh_data()
 

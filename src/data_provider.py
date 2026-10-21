@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -40,3 +41,4 @@ class YahooDataProvider(DataProvider):
         raise RuntimeError(
             "Provider Yahoo Finance nie jest aktywny w wersji offline-first."
         )
+

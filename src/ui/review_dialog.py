@@ -1,5 +1,8 @@
+
+
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
 
@@ -39,8 +42,8 @@ from src.metrics_engine import (
     get_trend_color,
     summarize_trends,
 )
-from src.models import Position, Review
-from src.rule_engine import calculate_return, categorize_with_thresholds, format_return
+from src.models import Position, PositionValuation, Review
+from src.rule_engine import categorize_with_thresholds, format_return
 
 
 def qdate_to_iso(value: QDate) -> str:
@@ -83,18 +86,19 @@ class ReviewDialog(QDialog):
         top_group = QGroupBox("Pozycja i cena")
         top_form = QFormLayout(top_group)
         self.position_combo = QComboBox()
-        self.buy_price_label = QLabel("-")
-        self.buy_price_label.setStyleSheet("color: #888888;")
+        self.average_cost_label = QLabel("-")
+        self.average_cost_label.setStyleSheet("color: #888888;")
         self.current_price_spin = QDoubleSpinBox()
         self.current_price_spin.setDecimals(4)
-        self.current_price_spin.setRange(0.0001, 999999.99)
+        self.current_price_spin.setRange(0.0, 999999.99)
+        self.current_price_spin.setSpecialValueText("wpisz cenę")
         self.current_price_spin.setSingleStep(0.1)
         self.review_date_edit = QDateEdit()
         self.review_date_edit.setCalendarPopup(True)
         self.review_date_edit.setDisplayFormat(DISPLAY_DATE_FORMAT)
         self.review_date_edit.setDate(QDate.currentDate())
         top_form.addRow("Spółka", self.position_combo)
-        top_form.addRow("Cena zakupu", self.buy_price_label)
+        top_form.addRow("Średni koszt", self.average_cost_label)
         top_form.addRow("Aktualna cena", self.current_price_spin)
         top_form.addRow("Data rewizji", self.review_date_edit)
         main_layout.addWidget(top_group)
@@ -196,7 +200,7 @@ class ReviewDialog(QDialog):
         self.position_combo.clear()
         for position in self.positions:
             self.position_combo.addItem(
-                f"{position.ticker} – {position.name}", position.id
+                f"{position.ticker} – {position.name or 'brak nazwy'}", position.id
             )
         if not self.positions:
             self.position_combo.addItem("Brak otwartych pozycji", None)
@@ -211,26 +215,31 @@ class ReviewDialog(QDialog):
         self._load_selected_position()
         self.current_price_spin.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def _load_selected_position(self) -> None:
+    def _load_selected_position(self, _index: int = -1) -> None:
         position_id = self.position_combo.currentData()
         self.current_position = (
             self.database.get_position_by_id(int(position_id)) if position_id else None
         )
         if self.current_position is None:
-            self.buy_price_label.setText("–")
+            self.average_cost_label.setText("–")
+            self.current_price_spin.setValue(0.0)
             return
 
         position = self.current_position
-        self.buy_price_label.setText(f"{position.buy_price:.4f} {position.currency}")
-        self.current_price_spin.setValue(position.display_price())
+        self.average_cost_label.setText(
+            f"{position.average_cost:.4f} {position.currency}"
+        )
+        self.current_price_spin.setValue(position.current_price or 0.0)
         self.previous_review = self.database.get_last_review_for_position(
             position.id or 0
         )
+        self.notes_edit.clear()
         self._load_previous_metrics()
         self._mark_dirty()
 
     def _load_previous_metrics(self) -> None:
         for metric_name, widgets in self.metric_widgets.items():
+            widgets["spin"].setValue(-1.0)
             previous = (
                 self.previous_review.metric_value(metric_name)
                 if self.previous_review is not None
@@ -257,7 +266,7 @@ class ReviewDialog(QDialog):
             for metric_name in METRIC_FIELDS
         }
 
-    def _mark_dirty(self) -> None:
+    def _mark_dirty(self, *_args: Any) -> None:
         self.last_result = None
         self.save_button.setEnabled(False)
 
@@ -268,12 +277,24 @@ class ReviewDialog(QDialog):
             )
             return
         position = self.current_position
-        try:
-            return_pct = calculate_return(
-                position.buy_price, self.current_price_spin.value()
+        current_price = self.current_price_spin.value()
+        if current_price <= 0:
+            QMessageBox.warning(
+                self,
+                "Brak ceny",
+                "Wpisz aktualną cenę rynkową większą od zera.",
             )
-        except ValueError as exc:
-            QMessageBox.warning(self, "Błąd obliczeń", str(exc))
+            return
+        snapshot = PositionValuation.snapshot(
+            replace(position, current_price=current_price)
+        )
+        return_pct = snapshot.unrealized_return
+        if return_pct is None:
+            QMessageBox.warning(
+                self,
+                "Błąd wyceny",
+                "Nie można wyliczyć zwrotu dla tej pozycji.",
+            )
             return
         category, instruction = categorize_with_thresholds(
             return_pct,
@@ -352,9 +373,8 @@ class ReviewDialog(QDialog):
             notes=self.notes_edit.toPlainText().strip() or None,
         )
         try:
-            self.database.insert_review(review)
-            self.database.update_position_after_review(
-                position.id or 0,
+            self.database.insert_review_and_update_position(
+                review,
                 self.current_price_spin.value(),
                 qdate_plus_days_iso(self.review_date_edit.date(), REVIEW_INTERVAL_DAYS),
             )
@@ -362,3 +382,4 @@ class ReviewDialog(QDialog):
             QMessageBox.critical(self, "Błąd zapisu", str(exc))
             return
         self.accept()
+

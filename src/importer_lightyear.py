@@ -1,3 +1,5 @@
+
+
 from __future__ import annotations
 
 import math
@@ -9,7 +11,12 @@ from typing import Any, Iterable
 
 import pandas as pd
 
-from src.config import DEFAULT_CURRENCY, REVIEW_INTERVAL_DAYS
+from src.config import (
+    DEFAULT_CURRENCY,
+    REVIEW_INTERVAL_DAYS,
+    STATUS_CLOSED,
+    STATUS_OPEN,
+)
 from src.database import Database
 from src.models import Position
 
@@ -23,12 +30,16 @@ class ImportResult:
 
 
 COLUMN_ALIASES = {
+    "isin": (
+        "isin",
+        "instrument isin",
+        "security isin",
+    ),
     "ticker": (
         "ticker",
         "symbol",
         "instrument ticker",
         "instrument symbol",
-        "isin ticker",
         "stock ticker",
     ),
     "name": (
@@ -77,6 +88,20 @@ COLUMN_ALIASES = {
 
 BUY_WORDS = ("buy", "bought", "purchase", "market buy", "limit buy", "kupno", "zakup")
 SELL_WORDS = ("sell", "sold", "market sell", "limit sell", "sprzedaż", "sprzedaz")
+SKIP_WORDS = (
+    "dividend",
+    "dywidenda",
+    "conversion",
+    "konwersja",
+    "deposit",
+    "wpłata",
+    "wplata",
+    "withdrawal",
+    "wypłata",
+    "wyplata",
+    "interest",
+    "odsetki",
+)
 
 
 def _normalise_column(value: str) -> str:
@@ -137,20 +162,55 @@ def _parse_float(value: Any) -> float | None:
 
 def _parse_date(value: Any) -> str:
     if _is_empty(value):
-        return date.today().isoformat()
+        raise ValueError("Brak daty transakcji.")
+    text = str(value).strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}(?:$|[ T])", text):
+        try:
+            return date.fromisoformat(text[:10]).isoformat()
+        except ValueError as exc:
+            raise ValueError(f"Nieprawidłowa data transakcji: {value!r}.") from exc
     parsed = pd.to_datetime(value, dayfirst=True, errors="coerce")
     if pd.isna(parsed):
-        return date.today().isoformat()
+        raise ValueError(f"Nieprawidłowa data transakcji: {value!r}.")
     return parsed.date().isoformat()
 
 
-def _action_allows_import(value: Any) -> bool:
+def _date_sort_key(value: Any) -> str:
+    try:
+        return _parse_date(value)
+    except ValueError:
+        return "9999-12-31"
+
+
+def _classify_action(value: Any) -> str:
     if _is_empty(value):
-        return True
+        return "BUY"
     text = str(value).lower()
+    if any(word in text for word in SKIP_WORDS):
+        return "SKIP"
     if any(word in text for word in SELL_WORDS):
-        return False
-    return any(word in text for word in BUY_WORDS) or True
+        return "SELL"
+    if any(word in text for word in BUY_WORDS):
+        return "BUY"
+    return "SKIP"
+
+
+def _normalise_isin(value: Any) -> str:
+    if _is_empty(value):
+        return ""
+    return re.sub(r"\s+", "", str(value)).upper()
+
+
+def _parse_quantity(value: Any) -> int | None:
+    parsed = _parse_float(value)
+    if parsed is None or parsed <= 0:
+        return None
+    rounded = round(parsed)
+    if not math.isclose(parsed, rounded, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(
+            "Model Position obsługuje wyłącznie całkowitą liczbę akcji."
+        )
+    return int(rounded)
 
 
 def _read_csv(path: Path) -> pd.DataFrame:
@@ -172,65 +232,128 @@ def import_lightyear_csv(path: Path, database: Database) -> ImportResult:
         key: _find_column(columns, aliases) for key, aliases in COLUMN_ALIASES.items()
     }
 
-    if mapped["ticker"] is None and mapped["name"] is None:
+    if mapped["isin"] is None:
         raise ValueError(
-            "CSV nie wygląda jak eksport Lightyear: brak kolumny ticker/symbol albo nazwy instrumentu."
+            "CSV nie wygląda jak eksport Lightyear: brak kolumny ISIN."
         )
 
-    for row_index, row in df.iterrows():
+    rows = list(df.iterrows())
+    if mapped["date"] is not None:
+        rows.sort(
+            key=lambda item: _date_sort_key(_cell(item[1], mapped["date"]))
+        )
+
+    for row_index, row in rows:
         try:
-            if not _action_allows_import(_cell(row, mapped["side"])):
+            action = _classify_action(_cell(row, mapped["side"]))
+            if action == "SKIP":
+                result.skipped += 1
+                continue
+
+            isin = _normalise_isin(_cell(row, mapped["isin"]))
+            if not isin:
+                result.errors.append(f"Wiersz {row_index + 2}: brak ISIN.")
                 result.skipped += 1
                 continue
 
             ticker_value = _cell(row, mapped["ticker"])
             name_value = _cell(row, mapped["name"])
-            ticker = str(ticker_value or name_value or "").strip().upper()
-            ticker = re.sub(r"\s+", "", ticker)[:10]
-            name = str(name_value or ticker).strip()
-            if not ticker:
-                result.skipped += 1
-                continue
+            ticker = re.sub(
+                r"\s+", "", str(ticker_value or isin).strip().upper()
+            )
+            name = str(name_value).strip() if name_value is not None else None
 
             price = _parse_float(_cell(row, mapped["price"]))
-            quantity = _parse_float(_cell(row, mapped["quantity"]))
+            quantity = _parse_quantity(_cell(row, mapped["quantity"]))
             amount = _parse_float(_cell(row, mapped["amount"]))
             if price is None and amount is not None and quantity not in {None, 0.0}:
                 price = abs(amount / quantity)
-            if price is None or price <= 0:
+            if price is None or price <= 0 or quantity is None:
                 result.skipped += 1
                 continue
 
-            buy_date = _parse_date(_cell(row, mapped["date"]))
+            transaction_date = _parse_date(_cell(row, mapped["date"]))
             currency = (
                 str(_cell(row, mapped["currency"]) or DEFAULT_CURRENCY)
                 .strip()
                 .upper()[:3]
             )
-            existing = database.get_position_by_ticker(ticker)
+            existing = database.get_position_by_isin(isin)
             if existing is None:
+                if action == "SELL":
+                    raise ValueError(
+                        f"Sprzedaż {isin} nie ma odpowiadającej otwartej pozycji."
+                    )
                 review_date = (
-                    date.fromisoformat(buy_date) + timedelta(days=REVIEW_INTERVAL_DAYS)
+                    date.fromisoformat(transaction_date)
+                    + timedelta(days=REVIEW_INTERVAL_DAYS)
                 ).isoformat()
                 position = Position(
                     ticker=ticker,
+                    isin=isin,
                     name=name,
+                    currency=currency or DEFAULT_CURRENCY,
                     sector="Akcje / Lightyear",
                     thesis=f"Import z pliku Lightyear: {path.name}",
-                    buy_price=price,
-                    current_price=price,
-                    buy_date=buy_date,
+                    initial_buy_price=price,
+                    initial_buy_date=transaction_date,
+                    quantity=quantity,
+                    average_cost=price,
+                    current_price=None,
                     review_date=review_date,
-                    currency=currency or DEFAULT_CURRENCY,
                 )
                 database.insert_position(position)
                 result.inserted += 1
-            else:
-                existing.current_price = price
-                if not existing.name or existing.name == existing.ticker:
-                    existing.name = name
+                continue
+
+            if existing.currency != currency:
+                raise ValueError(
+                    f"Waluta {currency} nie zgadza się z walutą pozycji "
+                    f"{existing.currency} dla {isin}."
+                )
+
+            previous_ticker = existing.ticker
+            if ticker:
+                existing.ticker = ticker
+            if name and (not existing.name or existing.name == previous_ticker):
+                existing.name = name
+
+            if action == "BUY":
+                previous_quantity = existing.quantity
+                new_quantity = previous_quantity + quantity
+                if previous_quantity == 0:
+                    existing.average_cost = price
+                else:
+                    existing.average_cost = (
+                        previous_quantity * existing.average_cost + quantity * price
+                    ) / new_quantity
+                existing.quantity = new_quantity
+                if existing.status == STATUS_CLOSED:
+                    existing.status = STATUS_OPEN
+                    existing.sell_date = None
+                    existing.sell_price = None
+                    existing.realized_gain = None
                 database.update_position(existing)
-                result.updated += 1
+            else:
+                if existing.status == STATUS_CLOSED or existing.quantity == 0:
+                    raise ValueError(f"Pozycja {isin} jest już zamknięta.")
+                if quantity > existing.quantity:
+                    raise ValueError(
+                        f"Sprzedaż {quantity} akcji przekracza posiadane "
+                        f"{existing.quantity} dla {isin}."
+                    )
+                if quantity == existing.quantity:
+                    if existing.id is None:
+                        raise ValueError("Pozycja nie ma identyfikatora bazy danych.")
+                    database.close_position(
+                        existing.id,
+                        sell_price=price,
+                        sell_date=transaction_date,
+                    )
+                else:
+                    existing.quantity -= quantity
+                    database.update_position(existing)
+            result.updated += 1
         except Exception as exc:
             result.errors.append(f"Wiersz {row_index + 2}: {exc}")
     return result

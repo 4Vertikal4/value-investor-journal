@@ -1,3 +1,5 @@
+
+
 from __future__ import annotations
 
 import sqlite3
@@ -19,8 +21,8 @@ from src.models import AssetCategory, MarketData, Position, PositionValuation, R
 POSITIONS_SQL = """
 CREATE TABLE IF NOT EXISTS positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker TEXT NOT NULL UNIQUE,
-    isin TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    isin TEXT NOT NULL UNIQUE,
     name TEXT,
     sector TEXT,
     thesis TEXT,
@@ -93,6 +95,7 @@ def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
 def init_db(db_path: Path = DB_PATH) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(POSITIONS_SQL)
+        _migrate_positions_schema(conn)
         conn.executescript(REVIEWS_SQL)
         conn.executescript(ASSET_CATEGORIES_SQL)
         conn.executescript(MARKET_DATA_SQL)
@@ -102,6 +105,81 @@ def init_db(db_path: Path = DB_PATH) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_positions_status_review ON positions(status, review_date)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_positions_isin ON positions(isin)"
+        )
+        category_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM asset_categories"
+        ).fetchone()
+        if category_count is not None and int(category_count["count"]) == 0:
+            conn.executemany(
+                """
+                INSERT INTO asset_categories (
+                    name, target_pct, actual_pct, color, sort_order
+                ) VALUES (?, ?, 0.0, ?, ?)
+                """,
+                ASSET_DEFAULTS,
+            )
+
+
+def _migrate_positions_schema(conn: sqlite3.Connection) -> None:
+    """Add fields introduced by the Position migration to an existing database.
+
+    SQLite does not update an existing table when CREATE TABLE IF NOT EXISTS is
+    executed.  The migration is intentionally additive so it does not destroy a
+    user's journal.  Legacy buy_price/buy_date values are copied when present.
+    """
+    columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(positions)").fetchall()
+    }
+    additions = {
+        "isin": "TEXT NOT NULL DEFAULT ''",
+        "name": "TEXT",
+        "currency": "TEXT NOT NULL DEFAULT 'USD'",
+        "sector": "TEXT",
+        "thesis": "TEXT",
+        "initial_buy_price": "REAL NOT NULL DEFAULT 0",
+        "initial_buy_date": "TEXT NOT NULL DEFAULT ''",
+        "sell_threshold_gain": "REAL NOT NULL DEFAULT 0.20",
+        "sell_threshold_profit": "REAL NOT NULL DEFAULT 0.10",
+        "sell_threshold_loss": "REAL NOT NULL DEFAULT -0.10",
+        "quantity": "INTEGER NOT NULL DEFAULT 1",
+        "average_cost": "REAL NOT NULL DEFAULT 0",
+        "current_price": "REAL",
+        "status": "TEXT NOT NULL DEFAULT 'OPEN'",
+        "sell_date": "TEXT",
+        "sell_price": "REAL",
+        "realized_gain": "REAL",
+        "review_date": "TEXT NOT NULL DEFAULT ''",
+    }
+    for column, definition in additions.items():
+        if column not in columns:
+            conn.execute(f"ALTER TABLE positions ADD COLUMN {column} {definition}")
+
+    if "buy_price" in columns:
+        conn.execute(
+            """
+            UPDATE positions
+            SET initial_buy_price = buy_price
+            WHERE initial_buy_price = 0
+            """
+        )
+    if "buy_date" in columns:
+        conn.execute(
+            """
+            UPDATE positions
+            SET initial_buy_date = buy_date
+            WHERE initial_buy_date = ''
+            """
+        )
+    conn.execute(
+        """
+        UPDATE positions
+        SET average_cost = initial_buy_price
+        WHERE average_cost = 0 AND initial_buy_price > 0
+        """
+    )
 
 
 class Database:
@@ -114,7 +192,7 @@ class Database:
         try:
             yield conn
             conn.commit()
-        except sqlite3.Error:
+        except Exception:
             conn.rollback()
             raise
         finally:
@@ -124,6 +202,7 @@ class Database:
         init_db(self.db_path)
 
     def insert_position(self, position: Position) -> int:
+        position.validate()
         sql = """
         INSERT INTO positions (
             ticker,
@@ -170,6 +249,17 @@ class Database:
             ).fetchone()
         return Position.from_row(row) if row else None
 
+    def get_position_by_isin(self, isin: str) -> Position | None:
+        normalized_isin = isin.upper().strip()
+        if not normalized_isin:
+            return None
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM positions WHERE UPPER(isin) = ? ORDER BY id LIMIT 1",
+                (normalized_isin,),
+            ).fetchone()
+        return Position.from_row(row) if row else None
+
     def get_all_positions(self, include_closed: bool = False) -> list[Position]:
         sql = "SELECT * FROM positions"
         params: tuple[object, ...] = ()
@@ -185,19 +275,25 @@ class Database:
         if position.id is None:
             raise ValueError("Pozycja musi mieć id przed aktualizacją.")
 
+        position.validate()
+
         sql = """
         UPDATE positions
-        SET isin = ?,
+        SET ticker = ?,
+            isin = ?,
             name = ?,
+            currency = ?,
             sector = ?,
             thesis = ?,
-            currency = ?,
+            initial_buy_price = ?,
+            initial_buy_date = ?,
             sell_threshold_gain = ?,
             sell_threshold_profit = ?,
             sell_threshold_loss = ?,
-            status = ?,
-            current_price = ?,
+            quantity = ?,
             average_cost = ?,
+            current_price = ?,
+            status = ?,
             sell_date = ?,
             sell_price = ?,
             realized_gain = ?,
@@ -205,36 +301,45 @@ class Database:
         WHERE id = ?
         """
 
-        values = (
-            position.isin.strip(),
-            position.name.strip() if position.name else None,
-            position.sector,
-            position.thesis,
-            position.currency,
-            position.sell_threshold_gain,
-            position.sell_threshold_profit,
-            position.sell_threshold_loss,
-            position.status,
-            position.current_price,
-            position.average_cost,
-            position.sell_date,
-            position.sell_price,
-            position.realized_gain,
-            position.review_date,
-            position.id,
-        )
-
         try:
             with self.connection() as conn:
-                conn.execute(sql, values)
+                stored = conn.execute(
+                    """
+                    SELECT isin, initial_buy_price, initial_buy_date
+                    FROM positions
+                    WHERE id = ?
+                    """,
+                    (position.id,),
+                ).fetchone()
+                if stored is None:
+                    raise ValueError(f"Nie znaleziono pozycji o id {position.id}.")
+
+                stored_isin = str(stored["isin"] or "").upper().strip()
+                new_isin = position.isin.upper().strip()
+                if stored_isin and stored_isin != new_isin:
+                    raise ValueError("ISIN istniejącej pozycji nie może być zmieniony.")
+                if (
+                    float(stored["initial_buy_price"])
+                    != position.initial_buy_price
+                    or str(stored["initial_buy_date"]) != position.initial_buy_date
+                ):
+                    raise ValueError(
+                        "Pierwotna cena i data zakupu nie mogą być zmienione."
+                    )
+
+                cursor = conn.execute(sql, (*position.to_db_tuple(), position.id))
+                if cursor.rowcount != 1:
+                    raise RuntimeError("Aktualizacja pozycji nie zmieniła żadnego rekordu.")
         except sqlite3.Error as exc:
             raise RuntimeError(
                 f"Nie udało się zaktualizować pozycji {position.ticker}: {exc}"
             ) from exc
 
     def update_position_current_price(
-        self, position_id: int, current_price: float
+        self, position_id: int, current_price: float | None
     ) -> None:
+        if current_price is not None and current_price <= 0:
+            raise ValueError("Aktualna cena musi być większa od zera.")
         try:
             with self.connection() as conn:
                 conn.execute(
@@ -249,6 +354,8 @@ class Database:
     def update_position_after_review(
         self, position_id: int, current_price: float, next_review_date: str
     ) -> None:
+        if current_price <= 0:
+            raise ValueError("Aktualna cena musi być większa od zera.")
         try:
             with self.connection() as conn:
                 conn.execute(
@@ -263,20 +370,93 @@ class Database:
     def update_position_status(self, position_id: int, status: str) -> None:
         if status not in {STATUS_OPEN, STATUS_CLOSED}:
             raise ValueError("Status musi mieć wartość OPEN albo CLOSED.")
+        raise RuntimeError(
+            "Nie zmieniaj samego statusu. Użyj close_position() albo "
+            "reopen_position(), aby zachować spójność danych."
+        )
+
+    def close_position(
+        self, position_id: int, sell_price: float, sell_date: str
+    ) -> None:
+        """Close a position in one transaction and store the realized return."""
+        if sell_price <= 0:
+            raise ValueError("Cena sprzedaży musi być większa od zera.")
+        try:
+            date.fromisoformat(sell_date)
+        except ValueError as exc:
+            raise ValueError("Data sprzedaży musi mieć format RRRR-MM-DD.") from exc
+
         try:
             with self.connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT * FROM positions WHERE id = ?",
+                    (position_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"Nie znaleziono pozycji o id {position_id}.")
+                position = Position.from_row(row)
+                if position.status == STATUS_CLOSED:
+                    raise ValueError("Pozycja jest już zamknięta.")
+                if position.quantity <= 0:
+                    raise ValueError("Nie można zamknąć pozycji bez posiadanych akcji.")
+                realized_gain = PositionValuation.realized_return(
+                    position, sell_price
+                )
                 conn.execute(
-                    "UPDATE positions SET status = ? WHERE id = ?",
-                    (status, position_id),
+                    """
+                    UPDATE positions
+                    SET quantity = 0,
+                        status = ?,
+                        sell_date = ?,
+                        sell_price = ?,
+                        realized_gain = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        STATUS_CLOSED,
+                        sell_date,
+                        sell_price,
+                        realized_gain,
+                        position_id,
+                    ),
                 )
         except sqlite3.Error as exc:
-            raise RuntimeError(f"Nie udało się zmienić statusu pozycji: {exc}") from exc
+            raise RuntimeError(f"Nie udało się zamknąć pozycji: {exc}") from exc
 
-    def close_position(self, position_id: int) -> None:
-        self.update_position_status(position_id, STATUS_CLOSED)
-
-    def reopen_position(self, position_id: int) -> None:
-        self.update_position_status(position_id, STATUS_OPEN)
+    def reopen_position(
+        self,
+        position_id: int,
+        quantity: int,
+        average_cost: float | None = None,
+    ) -> None:
+        if quantity <= 0:
+            raise ValueError("Ponownie otwarta pozycja musi mieć dodatnią ilość.")
+        try:
+            with self.connection() as conn:
+                row = conn.execute(
+                    "SELECT average_cost FROM positions WHERE id = ?", (position_id,)
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"Nie znaleziono pozycji o id {position_id}.")
+                new_average_cost = (
+                    float(row["average_cost"])
+                    if average_cost is None
+                    else average_cost
+                )
+                if new_average_cost <= 0:
+                    raise ValueError("Średni koszt musi być większy od zera.")
+                conn.execute(
+                    """
+                    UPDATE positions
+                    SET status = ?, quantity = ?, average_cost = ?,
+                        sell_date = NULL, sell_price = NULL, realized_gain = NULL
+                    WHERE id = ?
+                    """,
+                    (STATUS_OPEN, quantity, new_average_cost, position_id),
+                )
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"Nie udało się ponownie otworzyć pozycji: {exc}") from exc
 
     def delete_position(self, position_id: int) -> None:
         try:
@@ -295,6 +475,49 @@ class Database:
         try:
             with self.connection() as conn:
                 cursor = conn.execute(sql, review.to_db_tuple())
+                return int(cursor.lastrowid)
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"Nie udało się zapisać rewizji: {exc}") from exc
+
+    def insert_review_and_update_position(
+        self,
+        review: Review,
+        current_price: float,
+        next_review_date: str,
+    ) -> int:
+        """Persist a review and its position update in one transaction."""
+        if review.position_id <= 0:
+            raise ValueError("Rewizja wymaga poprawnego identyfikatora pozycji.")
+        if current_price <= 0:
+            raise ValueError("Aktualna cena musi być większa od zera.")
+
+        sql = """
+        INSERT INTO reviews (
+            position_id, review_date, price_then, return_pct, category, instruction,
+            pe_ratio, dividend_yield, debt_to_equity, roe, payout_ratio,
+            revenue_growth_3y, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        try:
+            with self.connection() as conn:
+                cursor = conn.execute(sql, review.to_db_tuple())
+                updated = conn.execute(
+                    """
+                    UPDATE positions
+                    SET current_price = ?, review_date = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        current_price,
+                        next_review_date,
+                        review.position_id,
+                        STATUS_OPEN,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise ValueError(
+                        "Nie znaleziono otwartej pozycji dla zapisywanej rewizji."
+                    )
                 return int(cursor.lastrowid)
         except sqlite3.Error as exc:
             raise RuntimeError(f"Nie udało się zapisać rewizji: {exc}") from exc
@@ -485,11 +708,6 @@ def seed_demo_data(db_path: Path = DB_PATH) -> None:
     if not db.is_database_empty():
         return
 
-    for name, target, color, order in ASSET_DEFAULTS:
-        db.insert_asset_category(
-            AssetCategory(name=name, target_pct=target, color=color, sort_order=order)
-        )
-
     today = date.today()
     buy_date = today - timedelta(days=220)
     next_review = buy_date + timedelta(days=REVIEW_INTERVAL_DAYS)
@@ -497,36 +715,45 @@ def seed_demo_data(db_path: Path = DB_PATH) -> None:
     positions = [
         Position(
             ticker="HEN",
+            isin="NL0000009165",
             name="Heineken N.V.",
+            currency="EUR",
             sector="Akcje / Consumer Defensive",
             thesis="Demo: mocna marka globalna, stabilne przepływy i potencjał poprawy marży.",
-            buy_price=82.00,
+            initial_buy_price=82.00,
+            initial_buy_date=buy_date.isoformat(),
+            quantity=10,
+            average_cost=82.00,
             current_price=96.50,
-            buy_date=buy_date.isoformat(),
             review_date=next_review.isoformat(),
-            currency="EUR",
         ),
         Position(
             ticker="DTG",
+            isin="DE000DTR0CK8",
             name="Daimler Truck Holding AG",
+            currency="EUR",
             sector="Akcje / Industrials",
             thesis="Demo: ekspozycja na cykl ciężarówek, dyscyplina kosztowa i potencjał dywidendowy.",
-            buy_price=34.20,
+            initial_buy_price=34.20,
+            initial_buy_date=(buy_date - timedelta(days=30)).isoformat(),
+            quantity=20,
+            average_cost=34.20,
             current_price=31.80,
-            buy_date=(buy_date - timedelta(days=30)).isoformat(),
             review_date=(next_review - timedelta(days=30)).isoformat(),
-            currency="EUR",
         ),
         Position(
             ticker="FME",
+            isin="DE0005785802",
             name="Fresenius Medical Care AG",
+            currency="EUR",
             sector="Akcje / Healthcare",
             thesis="Demo: restrukturyzacja, defensywny popyt i możliwy powrót ROE do średniej historycznej.",
-            buy_price=42.50,
+            initial_buy_price=42.50,
+            initial_buy_date=(buy_date - timedelta(days=60)).isoformat(),
+            quantity=12,
+            average_cost=42.50,
             current_price=47.20,
-            buy_date=(buy_date - timedelta(days=60)).isoformat(),
             review_date=(next_review - timedelta(days=60)).isoformat(),
-            currency="EUR",
         ),
     ]
 
@@ -534,11 +761,13 @@ def seed_demo_data(db_path: Path = DB_PATH) -> None:
     for position in positions:
         inserted[position.ticker] = db.insert_position(position)
 
-    from src.rule_engine import calculate_return, categorize_with_thresholds
+    from src.rule_engine import categorize_with_thresholds
 
     hen_position = db.get_position_by_id(inserted["HEN"])
     if hen_position is not None:
-        return_pct = calculate_return(hen_position.buy_price, 96.50)
+        return_pct = PositionValuation.snapshot(hen_position).unrealized_return
+        if return_pct is None:
+            return
         category, instruction = categorize_with_thresholds(
             return_pct,
             hen_position.sell_threshold_gain,

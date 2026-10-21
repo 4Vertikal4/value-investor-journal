@@ -1,6 +1,10 @@
+
+
 from __future__ import annotations
 
 from pathlib import Path
+
+from src.currencies import SUPPORTED_CURRENCIES
 
 APP_NAME = "Dziennik Inwestora Value"
 APP_VERSION = "1.0.0"
@@ -21,7 +25,6 @@ STATUS_OPEN = "OPEN"
 STATUS_CLOSED = "CLOSED"
 
 DEFAULT_CURRENCY = "USD"
-SUPPORTED_CURRENCIES = ("USD", "EUR", "PLN", "GBP")
 
 DEFAULT_SELL_THRESHOLD_GAIN = 0.20
 DEFAULT_SELL_THRESHOLD_PROFIT = 0.10
@@ -88,3 +91,4 @@ UI = {
     "help": "Pomoc",
     "about": "O aplikacji",
 }
+

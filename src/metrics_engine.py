@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from enum import Enum
@@ -91,3 +92,4 @@ def summarize_trends(trends: dict[str, MetricTrend]) -> dict[MetricTrend, int]:
             1 for trend in trends.values() if trend == MetricTrend.UNCHANGED
         ),
     }
+
