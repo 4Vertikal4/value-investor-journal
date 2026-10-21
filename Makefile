@@ -21,7 +21,7 @@ $(VENV)/bin/activate: requirements.txt
 
 # Odpalanie aplikacji bez wchodzenia do venv
 run:
-	@$(PYTHON) -m src.main
+	@$(PYTHON) main.py
 
 # Usuwanie "śmieci" projektowych
 clean:
