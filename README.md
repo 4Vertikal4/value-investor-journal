@@ -42,8 +42,8 @@ value-investor-journal/
 ├── data/
 ├── imports/
 ├── assets/icons/
+├── main.py
 ├── src/
-│   ├── main.py
 │   ├── database.py
 │   ├── rule_engine.py
 │   ├── metrics_engine.py
