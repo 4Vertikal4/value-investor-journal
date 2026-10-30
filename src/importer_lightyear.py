@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -27,6 +30,7 @@ class ImportResult:
     updated: int = 0
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
+    already_imported: bool = False
 
 
 COLUMN_ALIASES = {
@@ -213,11 +217,13 @@ def _parse_quantity(value: Any) -> int | None:
     return int(rounded)
 
 
-def _read_csv(path: Path) -> pd.DataFrame:
+def _read_csv(contents: bytes) -> pd.DataFrame:
+    stream = BytesIO(contents)
     try:
-        return pd.read_csv(path, sep=None, engine="python")
+        return pd.read_csv(stream, sep=None, engine="python")
     except UnicodeDecodeError:
-        return pd.read_csv(path, sep=None, engine="python", encoding="latin-1")
+        stream.seek(0)
+        return pd.read_csv(stream, sep=None, engine="python", encoding="latin-1")
 
 
 def import_lightyear_csv(path: Path, database: Database) -> ImportResult:
@@ -225,7 +231,24 @@ def import_lightyear_csv(path: Path, database: Database) -> ImportResult:
     if not path.exists():
         raise FileNotFoundError(f"Nie znaleziono pliku: {path}")
 
-    df = _read_csv(path)
+    contents = path.read_bytes()
+    content_sha256 = hashlib.sha256(contents).hexdigest()
+    with database.lightyear_import_transaction(content_sha256, path.name) as (
+        connection,
+        already_imported,
+    ):
+        if already_imported:
+            return ImportResult(already_imported=True)
+        return _import_lightyear_csv_contents(path, contents, database, connection)
+
+
+def _import_lightyear_csv_contents(
+    path: Path,
+    contents: bytes,
+    database: Database,
+    connection: sqlite3.Connection,
+) -> ImportResult:
+    df = _read_csv(contents)
     result = ImportResult()
     columns = list(df.columns)
     mapped = {
@@ -278,7 +301,7 @@ def import_lightyear_csv(path: Path, database: Database) -> ImportResult:
                 .strip()
                 .upper()[:3]
             )
-            existing = database.get_position_by_isin(isin)
+            existing = database.get_position_by_isin(isin, _connection=connection)
             if existing is None:
                 if action == "SELL":
                     raise ValueError(
@@ -302,7 +325,7 @@ def import_lightyear_csv(path: Path, database: Database) -> ImportResult:
                     current_price=None,
                     review_date=review_date,
                 )
-                database.insert_position(position)
+                database.insert_position(position, _connection=connection)
                 result.inserted += 1
                 continue
 
@@ -333,7 +356,7 @@ def import_lightyear_csv(path: Path, database: Database) -> ImportResult:
                     existing.sell_date = None
                     existing.sell_price = None
                     existing.realized_gain = None
-                database.update_position(existing)
+                database.update_position(existing, _connection=connection)
             else:
                 if existing.status == STATUS_CLOSED or existing.quantity == 0:
                     raise ValueError(f"Pozycja {isin} jest już zamknięta.")
@@ -349,10 +372,11 @@ def import_lightyear_csv(path: Path, database: Database) -> ImportResult:
                         existing.id,
                         sell_price=price,
                         sell_date=transaction_date,
+                        _connection=connection,
                     )
                 else:
                     existing.quantity -= quantity
-                    database.update_position(existing)
+                    database.update_position(existing, _connection=connection)
             result.updated += 1
         except Exception as exc:
             result.errors.append(f"Wiersz {row_index + 2}: {exc}")

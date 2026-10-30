@@ -83,6 +83,14 @@ CREATE TABLE IF NOT EXISTS market_data (
 );
 """
 
+LIGHTYEAR_IMPORTS_SQL = """
+CREATE TABLE IF NOT EXISTS lightyear_imports (
+    content_sha256 TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 
 def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +107,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
         conn.executescript(REVIEWS_SQL)
         conn.executescript(ASSET_CATEGORIES_SQL)
         conn.executescript(MARKET_DATA_SQL)
+        conn.executescript(LIGHTYEAR_IMPORTS_SQL)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_reviews_position_date ON reviews(position_id, review_date DESC, id DESC)"
         )
@@ -187,21 +196,56 @@ class Database:
         self.db_path = Path(db_path)
 
     @contextmanager
-    def connection(self) -> Iterator[sqlite3.Connection]:
-        conn = get_connection(self.db_path)
+    def connection(
+        self, existing_connection: sqlite3.Connection | None = None
+    ) -> Iterator[sqlite3.Connection]:
+        owns_connection = existing_connection is None
+        conn = (
+            existing_connection
+            if existing_connection is not None
+            else get_connection(self.db_path)
+        )
         try:
             yield conn
-            conn.commit()
+            if owns_connection:
+                conn.commit()
         except Exception:
-            conn.rollback()
+            if owns_connection:
+                conn.rollback()
             raise
         finally:
-            conn.close()
+            if owns_connection:
+                conn.close()
 
     def init(self) -> None:
         init_db(self.db_path)
 
-    def insert_position(self, position: Position) -> int:
+    @contextmanager
+    def lightyear_import_transaction(
+        self, content_sha256: str, file_name: str
+    ) -> Iterator[tuple[sqlite3.Connection, bool]]:
+        """Apply one CSV and its content receipt in the same SQLite transaction."""
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            imported = conn.execute(
+                "SELECT 1 FROM lightyear_imports WHERE content_sha256 = ?",
+                (content_sha256,),
+            ).fetchone()
+            already_imported = imported is not None
+            yield conn, already_imported
+            if not already_imported:
+                conn.execute(
+                    "INSERT INTO lightyear_imports (content_sha256, file_name) "
+                    "VALUES (?, ?)",
+                    (content_sha256, file_name),
+                )
+
+    def insert_position(
+        self,
+        position: Position,
+        *,
+        _connection: sqlite3.Connection | None = None,
+    ) -> int:
         position.validate()
         sql = """
         INSERT INTO positions (
@@ -227,7 +271,7 @@ class Database:
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         try:
-            with self.connection() as conn:
+            with self.connection(_connection) as conn:
                 cursor = conn.execute(sql, position.to_db_tuple())
                 return int(cursor.lastrowid)
         except sqlite3.Error as exc:
@@ -249,11 +293,13 @@ class Database:
             ).fetchone()
         return Position.from_row(row) if row else None
 
-    def get_position_by_isin(self, isin: str) -> Position | None:
+    def get_position_by_isin(
+        self, isin: str, *, _connection: sqlite3.Connection | None = None
+    ) -> Position | None:
         normalized_isin = isin.upper().strip()
         if not normalized_isin:
             return None
-        with self.connection() as conn:
+        with self.connection(_connection) as conn:
             row = conn.execute(
                 "SELECT * FROM positions WHERE UPPER(isin) = ? ORDER BY id LIMIT 1",
                 (normalized_isin,),
@@ -271,7 +317,12 @@ class Database:
             rows = conn.execute(sql, params).fetchall()
         return [Position.from_row(row) for row in rows]
 
-    def update_position(self, position: Position) -> None:
+    def update_position(
+        self,
+        position: Position,
+        *,
+        _connection: sqlite3.Connection | None = None,
+    ) -> None:
         if position.id is None:
             raise ValueError("Pozycja musi mieć id przed aktualizacją.")
 
@@ -302,7 +353,7 @@ class Database:
         """
 
         try:
-            with self.connection() as conn:
+            with self.connection(_connection) as conn:
                 stored = conn.execute(
                     """
                     SELECT isin, initial_buy_price, initial_buy_date
@@ -376,7 +427,12 @@ class Database:
         )
 
     def close_position(
-        self, position_id: int, sell_price: float, sell_date: str
+        self,
+        position_id: int,
+        sell_price: float,
+        sell_date: str,
+        *,
+        _connection: sqlite3.Connection | None = None,
     ) -> None:
         """Close a position in one transaction and store the realized return."""
         if sell_price <= 0:
@@ -387,8 +443,9 @@ class Database:
             raise ValueError("Data sprzedaży musi mieć format RRRR-MM-DD.") from exc
 
         try:
-            with self.connection() as conn:
-                conn.execute("BEGIN IMMEDIATE")
+            with self.connection(_connection) as conn:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
                     "SELECT * FROM positions WHERE id = ?",
                     (position_id,),

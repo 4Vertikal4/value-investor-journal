@@ -579,6 +579,14 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Import lightyear", str(exc))
             return
+        if result.already_imported:
+            QMessageBox.information(
+                self,
+                "Import lightyear",
+                "Plik o identycznej zawartości został już zaimportowany. "
+                "Dane nie zostały zmienione.",
+            )
+            return
         QMessageBox.information(
             self,
             "Import lightyear",

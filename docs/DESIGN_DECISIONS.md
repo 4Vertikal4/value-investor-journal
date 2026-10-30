@@ -34,14 +34,32 @@
   ilość. Sprzedaż całej ilości zamyka pozycję atomowo. To świadoma różnica wobec
   sugestii, aby pozostawić pozycję otwartą z `quantity == 0`, ponieważ taki stan
   łamałby przyjęty invariant domenowy.
+- Ponowny import identycznej zawartości CSV jest blokowany przez odcisk SHA-256
+  surowych bajtów pliku przechowywany w `lightyear_imports`. Odcisk i zmiany
+  pozycji zapisują się w jednej transakcji SQLite; nazwa pliku nie określa
+  duplikatu. `init_db()` dodaje tę tabelę przez `CREATE TABLE IF NOT EXISTS`,
+  bez przebudowy tabel pozycji. To rejestr importowanych plików, a nie ledger
+  transakcji.
+- Zmieniona zawartość jest traktowana jako nowy plik, nawet przy tej samej
+  nazwie. Aplikacja nie rozpoznaje nakładających się operacji w dwóch różnych
+  eksportach, więc nowy plik zawierający również wcześniej importowane wiersze
+  może ponownie zmienić ilości i koszt.
+- Importy wykonane przed dodaniem rejestru nie mają zapisanych odcisków. Aplikacja
+  nie potrafi ustalić, czy ich ponowne zaimportowanie jest bezpieczne; pierwszy
+  import historycznego pliku po aktualizacji nadal może powtórzyć jego operacje.
+- Import zachowuje dotychczasową obsługę błędów wierszy: poprawne wiersze są
+  zapisywane, a błędne zgłaszane w podsumowaniu. Odcisk zapisuje się także dla
+  takiego pliku, aby ponowny import jego identycznej zawartości nie powtórzył
+  poprawnych wierszy. Poprawione lub zmienione pliki nie są porównywane
+  transakcyjnie z wcześniejszymi eksportami.
 - `Dividend`, `Conversion`, `Deposit`, wypłaty i odsetki są pomijane.
 - Model używa całkowitego `quantity`, dlatego importer jawnie odrzuca ułamkowe
   ilości zamiast je zaokrąglać i po cichu zmieniać dane.
 
 ## Świadome ograniczenia
 
-- Projekt nie ma ledgeru transakcji. Z tego powodu ponowny import tego samego
-  kompletnego CSV nie może zostać bezpiecznie rozpoznany jako duplikat.
+- Projekt nie ma ledgeru transakcji. Ochrona dotyczy wyłącznie identycznych
+  plików, nie identycznych operacji przeniesionych do innego eksportu.
 - Przy częściowej sprzedaży nie zapisujemy oddzielnego zrealizowanego wyniku;
   `realized_gain` dotyczy pełnego zamknięcia pozycji.
 - Pozycje bez ceny rynkowej są pomijane w wartości portfela i w mianowniku
