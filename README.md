@@ -55,6 +55,12 @@ value-investor-journal/
 └── tests/
 ```
 
+## Dokumentacja projektowa
+
+- [Decyzje projektowe](docs/DESIGN_DECISIONS.md)
+- [Instrukcje pracy nad projektem](AGENTS.md)
+
+
 ## Najważniejsze funkcje
 
 Pozycje:
