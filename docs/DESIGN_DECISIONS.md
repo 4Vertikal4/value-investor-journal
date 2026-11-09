@@ -80,6 +80,14 @@
 - **Lightyear jako źródło bieżących metryk:** odczyt wskaźników w sekcji Advanced dokumentuje stan widoczny w dniu odczytu. Poszczególne wskaźniki mogą mieć różne podstawy czasowe: aktualną cenę rynkową, wyniki TTM lub wieloletni CAGR. Nie przypisujemy bieżącego zestawu automatycznie do dnia zakupu.
 - **Znaczenie automatycznej oceny:** kategoria i instrukcja w rewizji wynikają ze stopy zwrotu oraz progów decyzyjnych pozycji. Metryki fundamentalne dostarczają dodatkowego kontekstu, ale same nie wyznaczają automatycznej instrukcji. Własna ocena i decyzja inwestora pozostają w notatkach rewizji.
 - **Test interfejsu:** przetestowano uruchomienie aplikacji, historię fundamentalną, podgląd syntetycznego pakietu JSON, formularz wyboru danych do rewizji oraz zapis rzeczywistej rewizji FME z datą 2026-11-08. Pakiet demonstracyjny nie został zatwierdzony.
+- **Test rzeczywistych danych FME (2026-11-09):** zaimportowano dwie
+  obserwacje przychodów Grupy: Q3 2025 — 4 885 mln EUR, opublikowane
+  2025-11-04, oraz Q3 2026 — 4 937 mln EUR, opublikowane 2026-11-03.
+  Przy filtrze dostępności na 2026-10-31 widoczny był tylko Q3 2025;
+  po zmianie daty na 2026-11-03 widoczne były oba okresy. Ponowny podgląd
+  tego samego pakietu wykazał 0 nowych, 0 korekt i 2 powtórzenia.
+  Podgląd duplikatów anulowano bez ponownego zapisu. Test potwierdził
+  filtrowanie według daty publikacji i wykrywanie identycznych obserwacji.
 - **Obsługa formularza:** formularz rewizji jest przewijany. Po zmianie danych należy ponownie wykonać obliczenie; zapis jest dostępny dopiero po poprawnym obliczeniu. Pole notatek inwestora znajduje się poniżej sekcji wyniku i poprzedniej rewizji.
 ## Źródła prawdy
 
