@@ -17,6 +17,7 @@ from src.config import (
     STATUS_OPEN,
 )
 from src.models import AssetCategory, MarketData, Position, PositionValuation, Review
+from src.fundamentals import FundamentalStore, migrate_fundamentals
 
 POSITIONS_SQL = """
 CREATE TABLE IF NOT EXISTS positions (
@@ -108,6 +109,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
         conn.executescript(ASSET_CATEGORIES_SQL)
         conn.executescript(MARKET_DATA_SQL)
         conn.executescript(LIGHTYEAR_IMPORTS_SQL)
+        migrate_fundamentals(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_reviews_position_date ON reviews(position_id, review_date DESC, id DESC)"
         )
@@ -194,6 +196,7 @@ def _migrate_positions_schema(conn: sqlite3.Connection) -> None:
 class Database:
     def __init__(self, db_path: Path = DB_PATH) -> None:
         self.db_path = Path(db_path)
+        self.fundamentals = FundamentalStore(self)
 
     @contextmanager
     def connection(
@@ -526,12 +529,15 @@ class Database:
         sql = """
         INSERT INTO reviews (
             position_id, review_date, price_then, return_pct, category, instruction,
-            pe_ratio, dividend_yield, debt_to_equity, roe, payout_ratio, revenue_growth_3y, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            pe_ratio, dividend_yield, debt_to_equity, roe, payout_ratio, revenue_growth_3y, notes,
+            fundamental_evidence_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         try:
             with self.connection() as conn:
-                cursor = conn.execute(sql, review.to_db_tuple())
+                conn.execute("BEGIN IMMEDIATE")
+                evidence = self.fundamentals.freeze_review(review, conn)
+                cursor = conn.execute(sql, (*review.to_db_tuple()[:-1], evidence))
                 return int(cursor.lastrowid)
         except sqlite3.Error as exc:
             raise RuntimeError(f"Nie udało się zapisać rewizji: {exc}") from exc
@@ -552,12 +558,14 @@ class Database:
         INSERT INTO reviews (
             position_id, review_date, price_then, return_pct, category, instruction,
             pe_ratio, dividend_yield, debt_to_equity, roe, payout_ratio,
-            revenue_growth_3y, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            revenue_growth_3y, notes, fundamental_evidence_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         try:
             with self.connection() as conn:
-                cursor = conn.execute(sql, review.to_db_tuple())
+                conn.execute("BEGIN IMMEDIATE")
+                evidence = self.fundamentals.freeze_review(review, conn)
+                cursor = conn.execute(sql, (*review.to_db_tuple()[:-1], evidence))
                 updated = conn.execute(
                     """
                     UPDATE positions

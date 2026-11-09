@@ -282,6 +282,7 @@ class Review:
     revenue_growth_3y: float | None = None
     notes: str | None = None
     id: int | None = None
+    fundamental_evidence_json: str | None = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "Review":
@@ -300,6 +301,7 @@ class Review:
             payout_ratio=_row_get(row, "payout_ratio"),
             revenue_growth_3y=_row_get(row, "revenue_growth_3y"),
             notes=_row_get(row, "notes"),
+            fundamental_evidence_json=_row_get(row, "fundamental_evidence_json"),
         )
 
     def metric_value(self, metric_name: str) -> float | None:
@@ -321,6 +323,7 @@ class Review:
             self.payout_ratio,
             self.revenue_growth_3y,
             self.notes,
+            self.fundamental_evidence_json,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -339,6 +342,7 @@ class Review:
             "payout_ratio": self.payout_ratio,
             "revenue_growth_3y": self.revenue_growth_3y,
             "notes": self.notes,
+            "fundamental_evidence_json": self.fundamental_evidence_json,
         }
 
 

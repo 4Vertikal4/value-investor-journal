@@ -10,6 +10,7 @@ from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
+    QCheckBox,
     QDateEdit,
     QDialog,
     QDoubleSpinBox,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -41,7 +43,11 @@ from src.metrics_engine import (
     describe_metric_change,
     get_trend_color,
     summarize_trends,
+    review_metric_source,
+    sources_comparable,
 )
+from src.fundamentals import available_on, canonical, series_signature
+from src.ui.fundamentals_dialog import FundamentalsDialog
 from src.models import Position, PositionValuation, Review
 from src.rule_engine import categorize_with_thresholds, format_return
 
@@ -72,16 +78,25 @@ class ReviewDialog(QDialog):
         self.previous_review: Review | None = None
         self.metric_widgets: dict[str, dict[str, Any]] = {}
         self.last_result: dict[str, Any] | None = None
+        self.evidence_records: list[dict] = []
+        self.bindings: dict[str, int] = {}
+        self.imported_values: dict[str, float | None] = {}
         self.setWindowTitle("Dodaj rewizję")
         self.setModal(True)
-        self.resize(760, 720)
+        self.resize(950, 820)
         self._build_ui()
         self._load_positions()
         self._connect_signals()
         self._select_initial_position()
 
     def _build_ui(self) -> None:
-        main_layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        main_layout = QVBoxLayout(body)
+        scroll.setWidget(body)
+        outer_layout.addWidget(scroll)
 
         top_group = QGroupBox("Pozycja i cena")
         top_form = QFormLayout(top_group)
@@ -97,13 +112,23 @@ class ReviewDialog(QDialog):
         self.review_date_edit.setCalendarPopup(True)
         self.review_date_edit.setDisplayFormat(DISPLAY_DATE_FORMAT)
         self.review_date_edit.setDate(QDate.currentDate())
+        self.review_date_edit.setMaximumDate(QDate.currentDate())
         top_form.addRow("Spółka", self.position_combo)
         top_form.addRow("Średni koszt", self.average_cost_label)
         top_form.addRow("Aktualna cena", self.current_price_spin)
-        top_form.addRow("Data rewizji", self.review_date_edit)
+        top_form.addRow("Data rzeczywistej analizy", self.review_date_edit)
         main_layout.addWidget(top_group)
+        date_hint = QLabel("Data analizy nie jest datą zakupu ani okresem raportu. Historyczne dane nie tworzą dawnych rewizji.")
+        date_hint.setWordWrap(True)
+        main_layout.addWidget(date_hint)
+        self.fundamental_button = QPushButton("Historia spółki / import JSON / wybór danych…")
+        self.fundamental_button.clicked.connect(self._choose_fundamentals)
+        main_layout.addWidget(self.fundamental_button)
+        self.evidence_label = QLabel("Dane ręczne — pochodzenie i okres nieustalone.")
+        self.evidence_label.setWordWrap(True)
+        main_layout.addWidget(self.evidence_label)
 
-        metrics_group = QGroupBox("Metryki fundamentalne")
+        metrics_group = QGroupBox("Metryki przy rzeczywistych rewizjach — porównanie z poprzednią analizą")
         metrics_layout = QGridLayout(metrics_group)
         metrics_layout.setColumnStretch(1, 1)
         for row, metric_name in enumerate(METRIC_FIELDS):
@@ -114,10 +139,12 @@ class ReviewDialog(QDialog):
             name_label.setFont(name_font)
 
             spin = QDoubleSpinBox()
-            spin.setDecimals(2)
-            spin.setRange(-1.0, 9999.0)
-            spin.setSpecialValueText("brak")
-            spin.setValue(-1.0)
+            spin.setDecimals(8)
+            spin.setRange(-1e15, 1e15)
+            missing = QCheckBox("brak")
+            missing.setChecked(True)
+            spin.setEnabled(False)
+            missing.toggled.connect(lambda checked, s=spin: s.setEnabled(not checked))
             spin.setSingleStep(0.1)
             spin.setMinimumWidth(110)
             unit_label = QLabel(METRIC_UNITS.get(metric_name, ""))
@@ -130,13 +157,17 @@ class ReviewDialog(QDialog):
             desc_label.setStyleSheet("color: #888888;")
 
             metrics_layout.addWidget(name_label, row, 0)
-            metrics_layout.addWidget(spin, row, 1)
+            entry = QHBoxLayout()
+            entry.addWidget(spin)
+            entry.addWidget(missing)
+            metrics_layout.addLayout(entry, row, 1)
             metrics_layout.addWidget(unit_label, row, 2)
             metrics_layout.addWidget(previous_label, row, 3)
             metrics_layout.addWidget(trend_label, row, 4)
             metrics_layout.addWidget(desc_label, row, 5)
             self.metric_widgets[metric_name] = {
                 "spin": spin,
+                "missing": missing,
                 "previous_label": previous_label,
                 "trend_label": trend_label,
                 "desc_label": desc_label,
@@ -163,6 +194,7 @@ class ReviewDialog(QDialog):
             "Metryki polepszone: 0 / pogorszone: 0 / bez zmian: 0"
         )
         self.summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.summary_label.setWordWrap(True)
         result_layout.addWidget(self.return_label)
         result_layout.addWidget(self.category_label)
         result_layout.addWidget(self.instruction_label)
@@ -171,10 +203,15 @@ class ReviewDialog(QDialog):
 
         self.notes_edit = QTextEdit()
         self.notes_edit.setPlaceholderText(
-            "Notatki z rewizji, decyzja, kontekst fundamentalny..."
+            "Dzisiejsza teza, ocena, ryzyka i decyzja. Powody dawnego zakupu opisuj jako późniejsze wspomnienie, jeżeli nie masz dawnych notatek."
         )
         self.notes_edit.setMinimumHeight(110)
-        main_layout.addWidget(QLabel("Notatki"))
+        self.previous_notes = QTextEdit()
+        self.previous_notes.setReadOnly(True)
+        self.previous_notes.setMaximumHeight(100)
+        main_layout.addWidget(QLabel("Ocena inwestora: poprzednia rzeczywista rewizja"))
+        main_layout.addWidget(self.previous_notes)
+        main_layout.addWidget(QLabel("Ocena inwestora i decyzja w tej rewizji (kategoria powyżej jest automatyczna)"))
         main_layout.addWidget(self.notes_edit, 1)
 
         buttons_layout = QHBoxLayout()
@@ -184,7 +221,7 @@ class ReviewDialog(QDialog):
         self.cancel_button = QPushButton("Anuluj")
         buttons_layout.addWidget(self.save_button)
         buttons_layout.addWidget(self.cancel_button)
-        main_layout.addLayout(buttons_layout)
+        outer_layout.addLayout(buttons_layout)
 
     def _connect_signals(self) -> None:
         self.position_combo.currentIndexChanged.connect(self._load_selected_position)
@@ -193,8 +230,10 @@ class ReviewDialog(QDialog):
         self.cancel_button.clicked.connect(self.reject)
         self.current_price_spin.valueChanged.connect(self._mark_dirty)
         self.review_date_edit.dateChanged.connect(self._mark_dirty)
+        self.review_date_edit.dateChanged.connect(self._refresh_previous_review)
         for widgets in self.metric_widgets.values():
             widgets["spin"].valueChanged.connect(self._mark_dirty)
+            widgets["missing"].toggled.connect(self._mark_dirty)
 
     def _load_positions(self) -> None:
         self.position_combo.clear()
@@ -234,12 +273,20 @@ class ReviewDialog(QDialog):
             position.id or 0
         )
         self.notes_edit.clear()
+        self.evidence_records = []
+        self.bindings = {}
+        self.imported_values = {}
+        self.evidence_label.setText("Dane ręczne — pochodzenie i okres nieustalone.")
+        self.previous_notes.setPlainText(
+            f"{self.previous_review.review_date}\n{self.previous_review.notes or 'Brak notatek oceny inwestora.'}"
+            if self.previous_review else "Brak wcześniejszej rzeczywistej rewizji.")
         self._load_previous_metrics()
         self._mark_dirty()
 
     def _load_previous_metrics(self) -> None:
         for metric_name, widgets in self.metric_widgets.items():
-            widgets["spin"].setValue(-1.0)
+            widgets["spin"].setValue(0)
+            widgets["missing"].setChecked(True)
             previous = (
                 self.previous_review.metric_value(metric_name)
                 if self.previous_review is not None
@@ -253,18 +300,71 @@ class ReviewDialog(QDialog):
                 )
             widgets["trend_label"].setText("●")
             widgets["trend_label"].setStyleSheet("color: #888888;")
-            widgets["desc_label"].setText(" (bez zmian)")
+            widgets["desc_label"].setText(" (brak porównania)")
 
     def _metric_value(self, metric_name: str) -> float | None:
         spin = self.metric_widgets[metric_name]["spin"]
+        if self.metric_widgets[metric_name]["missing"].isChecked():
+            return None
         value = float(spin.value())
-        return None if value < 0 else value
+        imported = self.imported_values.get(metric_name)
+        if imported is not None and value == round(imported, 8):
+            return imported
+        return value
+
+    def _choose_fundamentals(self) -> None:
+        if self.current_position is None:
+            return
+        dialog = FundamentalsDialog(self.database, self.current_position.isin,
+            qdate_to_iso(self.review_date_edit.date()), choose=True, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                self.apply_fundamental_records(dialog.selected_records)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Wybór danych", str(exc))
+
+    def apply_fundamental_records(self, records: list[dict]) -> None:
+        reviewed_on = qdate_to_iso(self.review_date_edit.date())
+        if any(not available_on(r["observation"], reviewed_on) for r in records):
+            raise ValueError("Dane nie były dostępne w dniu rzeczywistej analizy.")
+        if len({r["logical_key"] for r in records}) != len(records):
+            raise ValueError("Wybierz jedną wersję korekty dla danego okresu i metryki.")
+        selected = {}
+        for name in METRIC_FIELDS:
+            items = [r for r in records if r["observation"]["metric"] == name]
+            if len({series_signature(r) for r in items}) > 1:
+                raise ValueError(f"{METRIC_LABELS[name]}: wybierz jedną definicję, zakres i podstawę okresu.")
+            if items:
+                selected[name] = max(items, key=lambda r: (r["observation"]["valuation_date"] or r["observation"]["period"]["end"], r["id"]))
+        self.evidence_records = records
+        self.bindings = {name: r["id"] for name, r in selected.items()}
+        self.imported_values = {name: r["observation"]["value"] for name, r in selected.items()}
+        for name, r in selected.items():
+            value = r["observation"]["value"]
+            self.metric_widgets[name]["missing"].setChecked(value is None)
+            self.metric_widgets[name]["spin"].setValue(value if value is not None else 0)
+        periods = sorted({r["observation"]["period"]["end"] for r in records})
+        self.evidence_label.setText(f"Dołączono {len(records)} obserwacji. Okresy: {', '.join(periods)}. Najnowsze wybrane wartości wypełniły pola; ręczne zmiany będą oznaczone.")
+        self._mark_dirty()
 
     def _metric_values(self) -> dict[str, float | None]:
         return {
             metric_name: self._metric_value(metric_name)
             for metric_name in METRIC_FIELDS
         }
+
+    def _refresh_previous_review(self, *_args) -> None:
+        if self.current_position is None:
+            return
+        earlier = [r for r in self.database.get_reviews_for_position(self.current_position.id or 0)
+                   if r.review_date <= qdate_to_iso(self.review_date_edit.date())]
+        self.previous_review = earlier[0] if earlier else None
+        self.previous_notes.setPlainText(
+            f"{self.previous_review.review_date}\n{self.previous_review.notes or 'Brak notatek.'}"
+            if self.previous_review else "Brak wcześniejszej rzeczywistej rewizji.")
+        for name, widgets in self.metric_widgets.items():
+            value = self.previous_review.metric_value(name) if self.previous_review else None
+            widgets["previous_label"].setText(f"poprzednio: {value if value is not None else 'brak'}")
 
     def _mark_dirty(self, *_args: Any) -> None:
         self.last_result = None
@@ -277,6 +377,10 @@ class ReviewDialog(QDialog):
             )
             return
         position = self.current_position
+        if any(not available_on(r["observation"], qdate_to_iso(self.review_date_edit.date())) for r in self.evidence_records):
+            QMessageBox.warning(self, "Dane późniejsze niż analiza", "Zmień wybór danych albo podaj właściwą datę rzeczywistej analizy.")
+            return
+        self._refresh_previous_review()
         current_price = self.current_price_spin.value()
         if current_price <= 0:
             QMessageBox.warning(
@@ -311,9 +415,13 @@ class ReviewDialog(QDialog):
                 else None
             )
             trend = compare_metric(metric_name, current, previous)
+            current_source = next((r for r in self.evidence_records if r["id"] == self.bindings.get(metric_name) and r["observation"]["value"] == current), None)
+            if not sources_comparable(current_source, review_metric_source(self.previous_review, metric_name)):
+                trend = MetricTrend.NO_DATA
             trends[metric_name] = trend
             color, emoji = get_trend_color(trend)
-            desc = describe_metric_change(metric_name, current, previous)
+            desc = "brak porównania" if trend == MetricTrend.NO_DATA else describe_metric_change(metric_name, current, previous)
+            self.metric_widgets[metric_name]["previous_label"].setText(f"poprzednio: {previous if previous is not None else 'brak'}")
             self.metric_widgets[metric_name]["trend_label"].setText(emoji)
             self.metric_widgets[metric_name]["trend_label"].setStyleSheet(
                 f"color: {color}; font-size: 13pt;"
@@ -335,7 +443,7 @@ class ReviewDialog(QDialog):
         self.summary_label.setText(
             "Metryki polepszone: "
             f"{summary[MetricTrend.IMPROVED]} / pogorszone: {summary[MetricTrend.WORSENED]} / "
-            f"bez zmian: {summary[MetricTrend.UNCHANGED]}"
+            f"bez zmian: {summary[MetricTrend.UNCHANGED]} / brak porównania: {summary[MetricTrend.NO_DATA]}. Ręczne definicje niezweryfikowane."
         )
 
         self.last_result = {
@@ -356,6 +464,11 @@ class ReviewDialog(QDialog):
             return
 
         position = self.current_position
+        if self.review_date_edit.date() != QDate.currentDate():
+            answer = QMessageBox.question(self, "Data wcześniejszej analizy",
+                "Czy analiza została rzeczywiście wykonana w podanym dniu? Historyczne dane spółki same nie uzasadniają wcześniejszej daty rewizji.\n\nZwrot nadal korzysta z bieżącego średniego kosztu pozycji. Aplikacja nie odtwarza historycznego stanu posiadania.")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         metric_values = self.last_result["metric_values"]
         review = Review(
             position_id=position.id or 0,
@@ -371,6 +484,7 @@ class ReviewDialog(QDialog):
             payout_ratio=metric_values["payout_ratio"],
             revenue_growth_3y=metric_values["revenue_growth_3y"],
             notes=self.notes_edit.toPlainText().strip() or None,
+            fundamental_evidence_json=canonical({"observation_ids": [r["id"] for r in self.evidence_records], "bindings": self.bindings}),
         )
         try:
             self.database.insert_review_and_update_position(
