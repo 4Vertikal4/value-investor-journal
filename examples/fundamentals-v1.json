@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "issuer": {
+    "id": "isin:ZZ0000000016",
+    "name": "Przykładowa Spółka — DANE SYNTETYCZNE"
+  },
+  "instruments": [
+    {
+      "isin": "ZZ0000000016",
+      "share_class": "akcje zwykłe",
+      "currency": "EUR",
+      "ticker": "DEMO"
+    },
+    {
+      "isin": "ZZ0000000024",
+      "share_class": "akcje uprzywilejowane",
+      "currency": "EUR",
+      "ticker": "DEMOP"
+    }
+  ],
+  "observations": [
+    {
+      "metric": "roe",
+      "scope": "company",
+      "isin": null,
+      "period": {
+        "start": "2023-01-01",
+        "end": "2023-12-31",
+        "basis": "annual"
+      },
+      "valuation_date": null,
+      "published_on": "2024-03-15",
+      "value": -2.5,
+      "unit": "percent",
+      "currency": null,
+      "definition": "Zysk netto przypisany właścicielom / średni kapitał własny właścicieli × 100; rok obrotowy.",
+      "source": {
+        "name": "SYNTETYCZNY raport 2023",
+        "url": "https://example.com/reports/2023",
+        "locator": "s. 12, tabela 3"
+      },
+      "calculation": null,
+      "missing_reason": null,
+      "uncertainty": null
+    },
+    {
+      "metric": "revenue",
+      "scope": "company",
+      "isin": null,
+      "period": {
+        "start": "2023-01-01",
+        "end": "2023-12-31",
+        "basis": "annual"
+      },
+      "valuation_date": null,
+      "published_on": "2024-03-15",
+      "value": 100000000,
+      "unit": "currency",
+      "currency": "EUR",
+      "definition": "Przychody skonsolidowane według sprawozdania, pełne jednostki EUR.",
+      "source": {
+        "name": "SYNTETYCZNY raport 2023",
+        "url": "https://example.com/reports/2023",
+        "locator": "s. 12, tabela 3"
+      },
+      "calculation": null,
+      "missing_reason": null,
+      "uncertainty": null
+    },
+    {
+      "metric": "debt_to_equity",
+      "scope": "company",
+      "isin": null,
+      "period": {
+        "start": "2023-01-01",
+        "end": "2023-12-31",
+        "basis": "annual"
+      },
+      "valuation_date": null,
+      "published_on": "2024-03-15",
+      "value": null,
+      "unit": "ratio",
+      "currency": null,
+      "definition": "Dług oprocentowany / kapitał własny na koniec roku.",
+      "source": {
+        "name": "SYNTETYCZNY raport 2023",
+        "url": "https://example.com/reports/2023",
+        "locator": "s. 12, tabela 3"
+      },
+      "calculation": null,
+      "missing_reason": "Brak rozbicia długu w przykładowym źródle.",
+      "uncertainty": null
+    },
+    {
+      "metric": "roe",
+      "scope": "company",
+      "isin": null,
+      "period": {
+        "start": "2024-01-01",
+        "end": "2024-12-31",
+        "basis": "annual"
+      },
+      "valuation_date": null,
+      "published_on": "2025-03-15",
+      "value": 8.5,
+      "unit": "percent",
+      "currency": null,
+      "definition": "Zysk netto przypisany właścicielom / średni kapitał własny właścicieli × 100; rok obrotowy.",
+      "source": {
+        "name": "SYNTETYCZNY raport 2024",
+        "url": "https://example.com/reports/2024",
+        "locator": "s. 12, tabela 3"
+      },
+      "calculation": null,
+      "missing_reason": null,
+      "uncertainty": null
+    },
+    {
+      "metric": "revenue",
+      "scope": "company",
+      "isin": null,
+      "period": {
+        "start": "2024-01-01",
+        "end": "2024-12-31",
+        "basis": "annual"
+      },
+      "valuation_date": null,
+      "published_on": "2025-03-15",
+      "value": 112000000,
+      "unit": "currency",
+      "currency": "EUR",
+      "definition": "Przychody skonsolidowane według sprawozdania, pełne jednostki EUR.",
+      "source": {
+        "name": "SYNTETYCZNY raport 2024",
+        "url": "https://example.com/reports/2024",
+        "locator": "s. 12, tabela 3"
+      },
+      "calculation": null,
+      "missing_reason": null,
+      "uncertainty": null
+    },
+    {
+      "metric": "debt_to_equity",
+      "scope": "company",
+      "isin": null,
+      "period": {
+        "start": "2024-01-01",
+        "end": "2024-12-31",
+        "basis": "annual"
+      },
+      "valuation_date": null,
+      "published_on": "2025-03-15",
+      "value": null,
+      "unit": "ratio",
+      "currency": null,
+      "definition": "Dług oprocentowany / kapitał własny na koniec roku.",
+      "source": {
+        "name": "SYNTETYCZNY raport 2024",
+        "url": "https://example.com/reports/2024",
+        "locator": "s. 12, tabela 3"
+      },
+      "calculation": null,
+      "missing_reason": "Brak rozbicia długu w przykładowym źródle.",
+      "uncertainty": null
+    },
+    {
+      "metric": "pe_ratio",
+      "scope": "instrument",
+      "isin": "ZZ0000000016",
+      "period": {
+        "start": "2024-01-01",
+        "end": "2024-12-31",
+        "basis": "annual"
+      },
+      "valuation_date": "2025-06-02",
+      "published_on": "2025-06-02",
+      "value": 12.5,
+      "unit": "ratio",
+      "currency": "EUR",
+      "definition": "Cena akcji zwykłej / podstawowy EPS za ostatni opublikowany rok obrotowy.",
+      "source": {
+        "name": "SYNTETYCZNY raport i kurs",
+        "url": "https://example.com/valuation",
+        "locator": "tabela EPS; kurs zamknięcia"
+      },
+      "calculation": "25 EUR (kurs 2025-06-02) / 2 EUR (EPS za 2024 opublikowany 2025-03-15) = 12.5.",
+      "missing_reason": null,
+      "uncertainty": "Wartości demonstracyjne, nie dotyczą rzeczywistej spółki."
+    }
+  ]
+}

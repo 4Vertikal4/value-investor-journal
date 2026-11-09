@@ -47,7 +47,8 @@ from src.exporter import (
     export_xlsx,
 )
 from src.importer_lightyear import import_lightyear_csv
-from src.metrics_engine import compare_metric, describe_metric_change, get_trend_color
+from src.metrics_engine import MetricTrend, compare_metric, describe_metric_change, get_trend_color, review_metric_source, sources_comparable
+from src.ui.fundamentals_dialog import FundamentalsDialog, show_review_evidence
 from src.models import Position, PositionValuation, Review
 from src.rule_engine import categorize_with_thresholds, format_return
 from src.ui.asset_allocation_widget import AssetAllocationWidget
@@ -79,6 +80,7 @@ class MainWindow(QMainWindow):
         self.review_action.setShortcut(QKeySequence("Ctrl+R"))
         self.import_action = QAction(UI["import_csv"], self)
         self.import_action.setShortcut(QKeySequence("Ctrl+I"))
+        self.fundamentals_action = QAction("Historia fundamentalna / import JSON", self)
         self.export_xlsx_action = QAction("Eksport XLSX", self)
         self.export_xlsx_action.setShortcut(QKeySequence("Ctrl+E"))
         self.export_csv_action = QAction("Eksport CSV", self)
@@ -152,7 +154,7 @@ class MainWindow(QMainWindow):
         self.thesis_text.setMaximumHeight(100)
         layout.addWidget(self.thesis_text)
 
-        metrics_group = QGroupBox("Metryki fundamentalne")
+        metrics_group = QGroupBox("Metryki zapisane przy rzeczywistych rewizjach")
         self.metrics_grid = QGridLayout(metrics_group)
         layout.addWidget(metrics_group)
 
@@ -167,6 +169,7 @@ class MainWindow(QMainWindow):
         self.review_history_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
         )
+        self.review_history_table.setToolTip("Dwuklik otwiera ocenę inwestora i zachowaną kopię danych źródłowych.")
         history_layout.addWidget(self.review_history_table)
         history_layout.addStretch()
         layout.addWidget(self.review_history_group)
@@ -177,6 +180,7 @@ class MainWindow(QMainWindow):
     def build_menu(self) -> None:
         file_menu = self.menuBar().addMenu(UI["file"])
         file_menu.addAction(self.import_action)
+        file_menu.addAction(self.fundamentals_action)
         file_menu.addSeparator()
         file_menu.addAction(self.backup_action)
         file_menu.addAction(self.export_xlsx_action)
@@ -201,6 +205,7 @@ class MainWindow(QMainWindow):
             self.add_action,
             self.review_action,
             self.import_action,
+            self.fundamentals_action,
             self.export_xlsx_action,
             self.allocation_action,
             self.refresh_action,
@@ -211,6 +216,8 @@ class MainWindow(QMainWindow):
         self.add_action.triggered.connect(self.add_position)
         self.review_action.triggered.connect(self.add_review_for_selected)
         self.import_action.triggered.connect(self.import_csv)
+        self.fundamentals_action.triggered.connect(self.open_fundamentals)
+        self.review_history_table.cellDoubleClicked.connect(self.open_review_evidence)
         self.export_xlsx_action.triggered.connect(self.export_xlsx_file)
         self.export_csv_action.triggered.connect(self.export_csv_file)
         self.backup_action.triggered.connect(self.export_backup_file)
@@ -350,10 +357,14 @@ class MainWindow(QMainWindow):
                 previous.metric_value(metric_name) if previous is not None else None
             )
             change = compare_metric(metric_name, current_value, previous_value)
+            if not sources_comparable(review_metric_source(last, metric_name), review_metric_source(previous, metric_name)):
+                change = MetricTrend.NO_DATA
             color, emoji = get_trend_color(change)
             description = describe_metric_change(
                 metric_name, current_value, previous_value
             )
+            if change == MetricTrend.NO_DATA:
+                description = "brak porównania"
             label = QLabel(METRIC_LABELS.get(metric_name, metric_name))
             unit = METRIC_UNITS.get(metric_name, "")
             current_text = (
@@ -390,6 +401,8 @@ class MainWindow(QMainWindow):
             )
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
+                if col == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, review)
                 if col in (1, 2):
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -408,6 +421,15 @@ class MainWindow(QMainWindow):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+
+    def open_fundamentals(self) -> None:
+        position = self.table.selected_position()
+        FundamentalsDialog(self.database, position.isin if position else None, parent=self).exec()
+
+    def open_review_evidence(self, row: int, _column: int) -> None:
+        item = self.review_history_table.item(row, 0)
+        if item is not None:
+            show_review_evidence(item.data(Qt.ItemDataRole.UserRole), self)
 
     def clear_metrics_grid(self) -> None:
         self.clear_layout(self.metrics_grid)

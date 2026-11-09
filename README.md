@@ -42,6 +42,14 @@ Dane przechowywane są lokalnie w bazie SQLite.
 - Payout ratio.
 - Revenue growth 3Y.
 - Porównywanie zmian wskaźników w czasie.
+- Odrębna historia danych fundamentalnych ze źródłami, definicjami i datami.
+- Import wersjonowanych pakietów JSON przygotowanych przez AI: podgląd,
+  kontrola instrumentu i jawne zatwierdzenie. Powtórzenia są pomijane,
+  korekty zachowują poprzednie wersje.
+- W rewizji można wybrać dane historyczne lub nadal wpisywać metryki ręcznie.
+  Rewizja zachowuje kopię użytych danych; import nie tworzy rewizji i nie
+  zmienia jej terminu. Data analizy pozostaje datą faktycznej oceny inwestora.
+- Wskaźniki z Lightyear mogą łączyć aktualną cenę rynkową z wynikami TTM lub CAGR. Data odczytu nie oznacza, że takie same wartości były znane w dniu zakupu.
 
 **Alokacja aktywów**
 - Podział portfela według kategorii.
@@ -115,18 +123,43 @@ value-investor-journal/
 │   └── icons/
 ├── data/
 ├── docs/
-│   └── DESIGN_DECISIONS.md
+│   ├── DESIGN_DECISIONS.md
+│   ├── FUNDAMENTALS_JSON.md
+│   └── USER_GUIDE.md
+├── examples/
+│   └── fundamentals-v1.json
 ├── imports/
 ├── src/
-│   ├── database.py
-│   ├── rule_engine.py
-│   ├── metrics_engine.py
+│   ├── __init__.py
 │   ├── asset_engine.py
-│   ├── importer_lightyear.py
+│   ├── config.py
+│   ├── currencies.py
+│   ├── data_provider.py
+│   ├── database.py
 │   ├── exporter.py
+│   ├── fundamentals.py
+│   ├── importer_lightyear.py
+│   ├── metrics_engine.py
+│   ├── models.py
 │   ├── notification_service.py
+│   ├── rule_engine.py
 │   └── ui/
+│       ├── __init__.py
+│       ├── asset_allocation_widget.py
+│       ├── close_position_dialog.py
+│       ├── dashboard_table.py
+│       ├── fundamentals_dialog.py
+│       ├── main_window.py
+│       ├── position_dialog.py
+│       ├── review_dialog.py
+│       └── styles.py
 ├── tests/
+│   ├── conftest.py
+│   ├── test_database.py
+│   ├── test_fundamentals.py
+│   ├── test_importer_lightyear.py
+│   ├── test_metrics_engine.py
+│   └── test_rule_engine.py
 ├── main.py
 ├── requirements.txt
 └── README.md
@@ -134,11 +167,16 @@ value-investor-journal/
 
 ## 8. Dokumentacja projektowa
 
+- [Instrukcja użytkownika](docs/USER_GUIDE.md)
 - [Decyzje projektowe](docs/DESIGN_DECISIONS.md)
+- [Format JSON dla AI i przykład](docs/FUNDAMENTALS_JSON.md)
+
+Historia fundamentalna i import JSON są dostępne z paska narzędzi oraz
+formularza rewizji. Dwuklik wpisu w historii rewizji pokazuje notatki inwestora
+i zachowany materiał źródłowy. Dane opublikowane po dacie analizy lub z nieznaną
+datą publikacji nie mogą być dołączone jako potwierdzony materiał tej rewizji.
 
 Dokumentacja decyzji projektowych opisuje przyjęte założenia architektoniczne, źródła prawdy w modelu danych, świadome ograniczenia oraz uzasadnienie zastosowanych rozwiązań.
-
-Szczegółowa instrukcja użytkownika zostanie udostępniona w osobnym dokumencie.
 
 ## 9. Dodatkowe informacje
 

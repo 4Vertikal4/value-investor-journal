@@ -31,10 +31,10 @@ def test_tolerance_returns_unchanged() -> None:
     ) == MetricTrend.UNCHANGED
 
 
-def test_none_returns_unchanged() -> None:
+def test_none_returns_no_comparison() -> None:
 
     assert compare_metric(
         "debt_to_equity",
         None,
         0.2,
-    ) == MetricTrend.UNCHANGED
+    ) == MetricTrend.NO_DATA
